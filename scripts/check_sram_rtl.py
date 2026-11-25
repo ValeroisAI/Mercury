@@ -1,4 +1,4 @@
-"""Run a bounded formal check of the four-requester Shared SRAM arbiter."""
+"""Elaborate the Shared SRAM arbiter and run its formal checks."""
 
 from __future__ import annotations
 
@@ -25,9 +25,9 @@ _MAP_CHECK = (
 )
 
 
-def main() -> int:
+def run_yosys_jobs(description: str, jobs: tuple[str, ...]) -> int:
     """Resolve Yosys and return its verification exit status."""
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=description)
     parser.add_argument("--yosys", default=shutil.which("yosys") or shutil.which("yowasp-yosys"))
     options = parser.parse_args()
     if not options.yosys:
@@ -37,11 +37,16 @@ def main() -> int:
         parser.error(f"Yosys executable not found: {options.yosys}")
     executable = Path(command).resolve()
     env = {**os.environ, "YOWASP_CACHE_DIR": str(_ROOT / "build" / "rtl-cache")}
-    for job in (_ELABORATE, _MAP_CHECK, _CHECK):
+    for job in jobs:
         code = subprocess.run([str(executable), "-p", job], cwd=_ROOT, check=False, env=env).returncode
         if code:
             return code
     return 0
+
+
+def main() -> int:
+    """Run structural and formal checks of the SRAM control block."""
+    return run_yosys_jobs(__doc__ or "", (_ELABORATE, _MAP_CHECK, _CHECK))
 
 
 if __name__ == "__main__":

@@ -23,6 +23,7 @@ module mercury_sram_arbiter #(
     // Truncation of pointer + offset implements round-robin wrap.
     reg [OWNER_BITS-1:0] next_owner [0:BANKS-1];
     wire [BANK_BITS-1:0] target_bank [0:REQUESTERS-1];
+    wire [ROW_BITS-1:0] target_row [0:REQUESTERS-1];
     reg [OWNER_BITS-1:0] owner;
     integer bank, offset, index;
     genvar i;
@@ -33,7 +34,7 @@ module mercury_sram_arbiter #(
         ) mapping (
             .line_addr(req_line[i*LINE_ADDR_BITS +: LINE_ADDR_BITS]),
             .bank(target_bank[i]),
-            .row()
+            .row(target_row[i])
         );
     end
 
@@ -53,8 +54,7 @@ module mercury_sram_arbiter #(
                     bank_owner[bank*OWNER_BITS +: OWNER_BITS] = owner;
                     // Keeping the upper address bits makes the XOR map
                     // bijective. The inverse can recover the low bank bits.
-                    bank_row[bank*ROW_BITS +: ROW_BITS] =
-                        req_line[owner*LINE_ADDR_BITS + BANK_BITS +: ROW_BITS];
+                    bank_row[bank*ROW_BITS +: ROW_BITS] = target_row[owner];
                 end
             end
         end

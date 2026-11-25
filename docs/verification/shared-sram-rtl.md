@@ -20,4 +20,4 @@ The default RTL has eight requesters, 64 banks and 22-bit line addresses. The ba
 
 The [formal harness](../../tests/rtl/sram_arbiter_tb.sv) proves the swizzled and linear mappings reversible for arbitrary 22-bit addresses with 64 banks. The separate arbitration harness checks four requesters and four banks across seven clock steps from reset. It checks destination selection, address preservation, issue and grant correspondence, and round-robin progression for a continuously contended bank with arbitrary backpressure.
 
-This is an RTL prototype for one part of the SCC memory path. SRAM macros, response and write-data networks, ECC, physical timing closure, and accelerator-level integration remain open. Generic elaboration provides structural evidence. It provides no PPA or silicon performance estimate.
+This is an RTL prototype for one part of the SCC memory path. Request decode, arbitration, and row selection share a combinational path. SRAM macros, response and write-data networks, ECC, pipeline partitioning, physical timing closure, and accelerator-level integration remain open. Generic elaboration provides structural evidence and leaves PPA unmeasured.
