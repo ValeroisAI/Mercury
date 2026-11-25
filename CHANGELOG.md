@@ -12,10 +12,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Multi-seed, multi-distribution CPU validation of FP8 training with a shared quantizer and an exact-accumulation control.
 - A SystemVerilog Shared Tensor SRAM bank mapper and round-robin arbiter, with generic elaboration and bounded formal checks.
 - A SystemVerilog DMA token scoreboard with a generation-tagged issue, completion, and wait protocol.
+- Exact FP8 products, ordered FP32 group sums, an interleaved four-stage FP32 adder, a six-stage FP32 FMA, and a fused group-boundary accumulator, with numerical and bounded RTL checks.
+- Scaled scalar FP8 dot prototypes with rounded products of binary32 scales, group descriptors, backpressure, and reset checks.
+- An evidence checklist for FPGA integration, N4P timing and area, Extended OAM-L board validation, and cluster qualification.
+- A single RTL regression command and reproducible UltraScale+ primitive mapping for ten standalone RTL tops.
+- An SRAM payload prototype for 512-bit lines with byte strobes, tagged readback, and requester backpressure.
 
 ### Changed
 
 - Reorganized the README around reproducible evidence, physical constraints, and the pre-silicon scope.
+- Replaced the SRAM arbiter's serial scan with parallel round-robin selection. The fixed-cycle interface and physical bank mapping stay the same.
+- Clarified the Workbench model data and concept render, added keyboard navigation to the qualification tabs, and improved active-control contrast in dark mode.
 
 ## [0.4.0] - 2026-11-25
 

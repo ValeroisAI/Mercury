@@ -1,14 +1,14 @@
 # Mercury-1
 
-An open-source RISC-V GPU architecture for AI training, with a runnable assembler, virtual machine, and hardware simulator.
+Mercury-1 is an open-source RISC-V GPU design for AI training. This repository includes a runnable assembler, functional virtual machine, architectural models, and SystemVerilog prototypes.
 
-[Quickstart](#quickstart) · [Architecture](./docs/architecture/mercury-1-spec.md) · [Benchmarks](#simulation-results) · [Scope](#current-scope--not-yet-built)
+> **Pre-silicon design.** Throughput, cost, and power figures come from design targets, analytical models, and CPU simulations.
+
+[Quickstart](#quickstart) · [Architecture](./docs/architecture/mercury-1-spec.md) · [Benchmarks](#simulation-results) · [RTL evidence](#rtl-evidence)
 
 ![Mercury-1D concept render showing two compute chiplets on an accelerator module](./assets/mercury-1-hero.jpg)
 
 **Mercury-1D design targets:** 1,152 dense BF16 TFLOPS · 2,304 dense FP8 TFLOPS · 144 GB GDDR7 ECC. Estimated hardware-only BOM: **$2,456** (excluding NRE).
-
-> Mercury-1 is a pre-silicon design. Throughput, cost, and power figures come from design targets, models, and CPU simulations.
 
 ## Quickstart
 
@@ -39,7 +39,7 @@ python -m http.server 8765 --bind 127.0.0.1
 
 Open [the qualification report](./docs/verification/qualification-report.md), inspect the charts in [`assets/charts/`](./assets/charts/), or browse `http://127.0.0.1:8765/dashboard/index.html` while the HTTP server is running.
 
-[FP8 training experiment](./docs/verification/fp8-training-validation.md) · [SRAM checks](./docs/verification/shared-sram-rtl.md) · [DMA token checks](./docs/verification/dma-token-rtl.md)
+[FP8 training experiment](./docs/verification/fp8-training-validation.md) · [Silicon readiness gates](./docs/verification/silicon-readiness.md)
 
 ## Architecture
 
@@ -143,6 +143,27 @@ All charts below are generated directly from the Python simulators (`scripts/gen
     ret
 ```
 
+## RTL evidence
+
+| Block | Reproduced evidence |
+| :--- | :--- |
+| [FP8 multiplication and group sum](./docs/verification/stme-group-rtl.md) | 262,144 operand and format combinations against the Python reference, plus a bounded check of the full 128-term group |
+| [Pipelined FP32 group sum](./docs/verification/stme-interleaved-rtl.md) | Four-stage addition and 16 consecutive accepted inputs across eight independent contexts in a bounded handshake check |
+| [Pipelined FP32 FMA](./docs/verification/stme-boundary-rtl.md#six-stage-fma-prototype) | Six-stage prototype with directed latency checks and 30,632 arithmetic comparisons |
+| [Scaled scalar FP8 dot](./docs/verification/stme-fp8-dot-rtl.md) | Two binary32 scales round once before FMA. Bounded handshake and reset checks preserve group order and an exact fused residual of `-2^-46`. |
+| [SRAM bank arbiter](./docs/verification/shared-sram-rtl.md) and [DMA tokens](./docs/verification/dma-token-rtl.md) | XOR bank mapping, arbitration, and generation-tagged completion checks |
+| [Banked SRAM payload](./docs/verification/sram-payload-rtl.md) | 64-bank structural check and directed tests of byte masks, response routing, stalls, and reset on a reduced configuration |
+
+With Yosys on PATH, run the [RTL regression](./scripts/check_rtl.py) from the repository root:
+
+```sh
+python scripts/check_rtl.py
+```
+
+Use `--exhaustive --fpga` for the full FP8 product sweep, the 128-term group check, and FPGA synthesis.
+
+[Yosys setup](./docs/verification/shared-sram-rtl.md) · [FP32 FMA checks](./docs/verification/stme-boundary-rtl.md) · [FPGA primitive counts](./docs/verification/fpga-mapping.md) · [Silicon readiness gates](./docs/verification/silicon-readiness.md)
+
 ## Repository reference
 
 | Module | Focus | Tests |
@@ -164,7 +185,7 @@ All charts below are generated directly from the Python simulators (`scripts/gen
 
 ## Current scope & not yet built
 
-- **Verified in this repository.** The Python suite covers the yield and thermal models, PCB courtyard and NRE estimates, fabric sensitivity, crossbar timing, multi-seed FP8 validation, and the `Xmer*` assembler and VM. Two RTL prototypes cover SRAM bank mapping and arbitration, and the DMA token lifecycle.
+- **Verified in this repository.** The Python suite covers the yield and thermal models, PCB courtyard and NRE estimates, fabric sensitivity, crossbar timing, multi-seed FP8 validation, and the `Xmer*` assembler and VM. RTL checks cover scalar FP8 arithmetic, group scheduling, SRAM bank arbitration, and the DMA token lifecycle.
 - **Not yet built (next engineering milestones):**
   - Full GPU and SCC RTL, including SRAM macros, data crossbars, ECC, STME/RVV datapaths, and system-level RTL simulation.
   - TSMC N4P physical place-and-route, static timing analysis (STA) closure at 1.85 GHz, and IR-drop signoff.
