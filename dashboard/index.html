@@ -43,10 +43,10 @@
           <span class="status-dot" aria-hidden="true"></span>
           <span>RISC-V <code class="mono">RV64IMAFDC_Zve64f_Zvfbfmin_Xmer*</code> on TSMC N4P (453.8 mm² single mask)</span>
         </p>
-        <h1>High-TFLOPS open AI training silicon without the HBM3e or CoWoS-L packaging tax</h1>
+        <h1>An open RISC-V GPU design for AI training</h1>
         <p class="hero-lead">
-          Mercury-1 pairs a dual-chiplet organic UCIe-S package with wide-bus Clamshell GDDR7,
-          384 MB on-die Shared Tensor SRAM, native IEEE-FP32 block-FP8 accumulation, and 4x400GbE RoCEv2.
+          Compare the Mercury-1S PCIe card and Mercury-1D dual-chiplet module.
+          Explore simulated thermals, PCB clearance, and training numerics.
         </p>
 
         <div class="sku-bar" role="group" aria-label="Select Mercury-1 SKU">
@@ -69,9 +69,7 @@
             width="1440"
             height="748"
           />
-          <figcaption id="hero-caption">
-            Mercury-1D conceptual dual-die module: 2x 453.8 mm² N4P chiplets bridged by 1.2 TB/s UCIe-S.
-          </figcaption>
+          <figcaption>Mercury-1D concept render · Two compute chiplets on the Extended OAM-L module.</figcaption>
         </figure>
 
         <div class="die-budget-card" aria-label="TSMC N4P Single-Mask Die Area Split">
@@ -101,20 +99,20 @@
       <div class="section-head">
         <div>
           <h2>Virtual Bring-Up &amp; Qualification Telemetry</h2>
-          <p class="section-sub">Loaded live from verified Python runs (<code class="mono">dashboard/data/qualification.json</code>).</p>
+          <p class="section-sub">Precomputed results from the repository’s Python qualification runs.</p>
         </div>
         <div class="tablist" role="tablist" aria-label="Qualification Benches">
-          <button class="tab-btn is-active" role="tab" aria-selected="true" data-tab="thermal">Thermal &amp; Power</button>
-          <button class="tab-btn" role="tab" aria-selected="false" data-tab="pcb">PCB Courtyard &amp; NRE</button>
-          <button class="tab-btn" role="tab" aria-selected="false" data-tab="microarch">Crossbar &amp; PyTorch</button>
-          <button class="tab-btn" role="tab" aria-selected="false" data-tab="isa">RISC-V Xmer* VM</button>
+          <button class="tab-btn is-active" type="button" id="tab-thermal" role="tab" aria-selected="true" aria-controls="panel-thermal">Thermal &amp; Power</button>
+          <button class="tab-btn" type="button" id="tab-pcb" role="tab" aria-selected="false" aria-controls="panel-pcb" tabindex="-1">PCB Courtyard &amp; NRE</button>
+          <button class="tab-btn" type="button" id="tab-microarch" role="tab" aria-selected="false" aria-controls="panel-microarch" tabindex="-1">Crossbar &amp; PyTorch</button>
+          <button class="tab-btn" type="button" id="tab-isa" role="tab" aria-selected="false" aria-controls="panel-isa" tabindex="-1">RISC-V Xmer* VM</button>
         </div>
       </div>
 
-      <div id="load-state" class="load-banner" hidden></div>
+      <div id="load-state" class="load-banner" role="status">Loading qualification results…</div>
 
       <!-- Panel 1: Thermal & Power -->
-      <div class="tab-panel is-active" data-panel="thermal" role="tabpanel">
+      <div class="tab-panel is-active" id="panel-thermal" role="tabpanel" aria-labelledby="tab-thermal" tabindex="0">
         <div class="panel-toolbar">
           <div class="pill-group" id="thermal-buttons" role="group" aria-label="Thermal Scenario">
             <button class="pill-btn is-active" type="button" data-thermal="oam_liquid_35c" aria-pressed="true">1D Liquid 35°C</button>
@@ -133,7 +131,7 @@
       </div>
 
       <!-- Panel 2: PCB Courtyard & NRE -->
-      <div class="tab-panel" data-panel="pcb" role="tabpanel" hidden>
+      <div class="tab-panel" id="panel-pcb" role="tabpanel" aria-labelledby="tab-pcb" tabindex="0" hidden>
         <div class="grid-two">
           <div class="surface-box">
             <h3>Physical PCB Courtyard Audit</h3>
@@ -168,7 +166,7 @@
       </div>
 
       <!-- Panel 3: Crossbar & PyTorch -->
-      <div class="tab-panel" data-panel="microarch" role="tabpanel" hidden>
+      <div class="tab-panel" id="panel-microarch" role="tabpanel" aria-labelledby="tab-microarch" tabindex="0" hidden>
         <div class="grid-two">
           <div class="surface-box">
             <h3>Cycle-Level Architectural Crossbar &amp; Multicast</h3>
@@ -191,7 +189,7 @@
       </div>
 
       <!-- Panel 4: RISC-V Xmer* VM -->
-      <div class="tab-panel" data-panel="isa" role="tabpanel" hidden>
+      <div class="tab-panel" id="panel-isa" role="tabpanel" aria-labelledby="tab-isa" tabindex="0" hidden>
         <div class="grid-two">
           <div class="surface-box">
             <h3>Assembled 32-bit Open RISC-V Kernel Verification</h3>

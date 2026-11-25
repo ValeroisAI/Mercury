@@ -17,7 +17,7 @@
 | `--ink-primary` | `#0D1522` | `#EDF2F7` | Headings, table figures, primary labels |
 | `--ink-secondary` | `#4A5568` | `#94A3B8` | Supporting explanations, axis ticks |
 | `--border-hairline` | `#D5DCE6` | `#243244` | 1px structural dividers & panel borders |
-| `--accent` | `#0F52BA` | `#3B82F6` | Single primary focal accent (Mercury-1, active tabs) |
+| `--accent` | `#0F52BA` | `#60A5FA` | Single primary accent. Active text over `--accent-soft` reaches 5.67:1 in dark mode. [WCAG contrast minimum](https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html) |
 | `--accent-soft` | `#E6EEF9` | `#172A46` | Active pill / subtle highlight fill |
 | `--status-pass` | `#047857` | `#10B981` | Passing qualification gates & XOR swizzle |
 | `--status-warn` | `#B45309` | `#F59E0B` | `85°C 2x tREFI` warning & DVFS throttling |
@@ -42,5 +42,8 @@
 ## 5. Rules & Prohibitions
 - **Never:** Purple gradients, frosted glass cards, emoji as icons, uniform rows of identical KPI cards as the entire layout, grey text over colored fills, or `->` / `→` appended to buttons.
 - **Interactive States:** Every button, tab, and slider must render distinct default, `:hover`, `:focus-visible` (`2px solid var(--accent)` outline), active/selected, and empty/loading fallback states.
+- **Qualification tabs:** The active tab is the tab sequence entry point. Left and Right Arrow navigate and select with wraparound. Home and End select the first and last panels. Each panel is labelled by its tab. [WAI-ARIA tabs pattern](https://www.w3.org/WAI/ARIA/apg/patterns/tabs/)
+- **Concept imagery:** Keep the pictured SKU named in the caption. The specification ledger follows the selected SKU.
+- **Qualification status:** Use neutral surface and text tokens for loading. Apply the failure token when the data request fails, and announce both states via the status region.
 - **Added Components:** `.die-budget-card` (proportional N4P die area bar and yield figure), inline `<svg>` telemetry panels (`#thermal-svg` 2-node thermal chart, `#convergence-svg` 20-step PyTorch loss curves), `.grid-two` dual-panel workbench grid, and `.col-hide-sm` mobile table column collapsing without clipping.
 - **Responsive Breakpoints:** Verified at desktop (`1440px`) and mobile portrait (`390px`) in both `light` and `dark` themes without horizontal overflow.

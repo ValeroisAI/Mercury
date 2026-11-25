@@ -4,7 +4,6 @@
   const state = {
     data: null,
     sku: "Mercury-1D",
-    tab: "thermal",
     thermalKey: "oam_liquid_35c",
     nreVolume: 100000,
   };
@@ -47,7 +46,7 @@
       <div class="ledger-cell">
         <dt>GDDR7 &amp; Tensor SRAM</dt>
         <dd class="ledger-val">${s.vram_gb} GB</dd>
-        <dd class="ledger-sub">${s.vram_gib} GiB · ${s.vram_bw_tbs} TB/s DRAM · ${s.shared_sram_bw_tbs} TB/s SRAM</dd>
+        <dd class="ledger-sub">${s.vram_gib} GiB · ${s.vram_bw_tbs} TB/s DRAM · ${s.shared_sram_mb} MB SRAM at ${s.shared_sram_bw_tbs} TB/s · ${s.l1_rf_mib} MiB L1/RF</dd>
       </div>
       <div class="ledger-cell">
         <dt>Est. Hardware BOM</dt>
@@ -60,8 +59,6 @@
         <dd class="ledger-sub">${s.eth_ports_400g}x 400GbE, ${s.active_sccs}/${s.fab_sccs} SCCs</dd>
       </div>
     `;
-    const cap = document.getElementById("hero-caption");
-    cap.textContent = `${s.name} (${s.form_factor}): ${s.dies}x 453.8 mm² N4P chiplet(s), ${s.shared_sram_mb} MB Shared Tensor SRAM + ${s.l1_rf_mib} MiB L1/RF.`;
   }
 
   function renderThermalSvg() {
@@ -410,19 +407,32 @@
       });
     });
 
-    document.querySelectorAll(".tab-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        state.tab = btn.dataset.tab;
-        document.querySelectorAll(".tab-btn").forEach((b) => {
-          const on = b === btn;
-          b.classList.toggle("is-active", on);
-          b.setAttribute("aria-selected", on ? "true" : "false");
-        });
-        document.querySelectorAll(".tab-panel").forEach((p) => {
-          const on = p.dataset.panel === state.tab;
-          p.classList.toggle("is-active", on);
-          p.hidden = !on;
-        });
+    const tabs = [...document.querySelectorAll(".tab-btn")];
+    function activateTab(selected) {
+      tabs.forEach((tab) => {
+        const on = tab === selected;
+        tab.classList.toggle("is-active", on);
+        tab.setAttribute("aria-selected", String(on));
+        tab.tabIndex = on ? 0 : -1;
+        const panel = document.getElementById(tab.getAttribute("aria-controls"));
+        panel.classList.toggle("is-active", on);
+        panel.hidden = !on;
+      });
+    }
+    tabs.forEach((tab, index) => {
+      tab.addEventListener("click", () => activateTab(tab));
+      tab.addEventListener("keydown", (ev) => {
+        const offsets = {
+          ArrowLeft: (index - 1 + tabs.length) % tabs.length,
+          ArrowRight: (index + 1) % tabs.length,
+          Home: 0,
+          End: tabs.length - 1,
+        };
+        if (!Object.hasOwn(offsets, ev.key)) return;
+        ev.preventDefault();
+        const target = tabs[offsets[ev.key]];
+        activateTab(target);
+        target.focus();
       });
     });
 
@@ -458,8 +468,10 @@
       renderPcbAndNre();
       renderMicroarchAndTorch();
       renderIsaAndCluster();
+      banner.hidden = true;
     } catch (err) {
       banner.hidden = false;
+      banner.dataset.error = "";
       banner.textContent = `Could not load dashboard/data/qualification.json (${err.message}). Run "python scripts/export_dashboard_data.py" and serve via HTTP.`;
     }
   }
