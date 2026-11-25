@@ -277,7 +277,9 @@ def simulate_1t_token_pretraining_tco(
     m1d_thermal = simulate_thermal_run(MERCURY_1D, "oam_liquid_35c", "training_fp8", duration_s=300.0)
 
     # Per-GPU system capex including switches/host share:
-    # Mercury-1D: $4,700 card + $800 Ethernet/server share = $5,500/GPU
+    # Mercury-1D: ~$4,700 steady-state volume baseline excl. $85M upfront NRE
+    # (see physical_bom.analyze_nre_and_tco() for NRE-amortized volume prices)
+    # + $800 Ethernet/server share = $5,500/GPU
     # H100: $30,000/GPU incl NVSwitch/InfiniBand share
     # B200: $40,000/GPU incl NVLink5/IB share
     candidates = [

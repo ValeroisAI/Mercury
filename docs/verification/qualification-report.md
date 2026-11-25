@@ -24,7 +24,7 @@
 
 **Thermal Engineering Findings:**
 - **`Mercury-1S` (PCIe Air):** Holds full `1.85 GHz` at 25°C ambient; at 35°C hot chassis, backside clamshell GDDR7 stays safe under PMU control.
-- **`Mercury-1D` (OAM):** 4U air at 35°C triggers GDDR7 `2× tREFI` (`>85°C`) and closed-loop DVFS throttling—proving why **OCP OAM 2.0 Direct-to-Chip Liquid** is the production cooling spec (`54.6°C` $T_j$, `68.0°C` $T_{\text{mem}}$, zero throttling, plus ~42W subthreshold leakage savings).
+- **`Mercury-1D` (Extended OAM-L):** 4U air at 35°C triggers GDDR7 `2× tREFI` (`>85°C`) and closed-loop DVFS throttling—proving why **Extended OAM-L (140×185 mm) Direct-to-Chip Liquid** is the production cooling spec (`54.6°C` $T_j$, `68.0°C` $T_{\text{mem}}$, zero throttling, plus ~42W subthreshold leakage savings).
 - **Fault & Power Virus Safety:** Mid-run pump/fan failure clamps DVFS safely (`peak Tj <= 106°C`), and synthetic `1.28×` power-virus stays clamped below `730W` board limit.
 
 ## 3. Cluster Parallelism, MoE, Link Fault & Decode Honesty (Scenarios 6–8)
@@ -105,12 +105,13 @@
 | 64x NVIDIA H100 SXM (NVLink4 + IB) | $1,920,000 | 70.8 kW | 91.4 d | $12,418 | $172,649 | **$0.1726** |
 | 64x NVIDIA B200 (NVLink5 + IB) | $2,560,000 | 97.9 kW | 37.5 d | $7,051 | $94,742 | **$0.0947** |
 
-## 6. Cycle-Accurate SCC Crossbar, PyTorch Parity & Live ISA VM Verification
+## 6. Cycle-Level Architectural Crossbar, PyTorch Parity & Live ISA VM Verification
 
-### 6.1 Cycle-Accurate 64-Bank Crossbar & GDDR7 Controller (`128×128×2048` Tile)
+### 6.1 Cycle-Level Architectural 64-Bank Crossbar & GDDR7 Controller
 | Mode | Total Cycles | Achieved FP8 TFLOPS | Shared SRAM (TB/s) | Bank Conflict Cycles | DRAM Stall Cycles |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| XOR-Swizzled Baseline | 10,949 | 1,723.5 | 13.47 | 0 | 900 |
+| 256×128 + A-Operand Multicast | 18,666 | 2,022.0 | 4.36 | 0 | 1,221 |
+| 128×128 XOR-Swizzled Baseline | 10,949 | 1,723.5 | 13.47 | 0 | 900 |
 | Hot >=85°C (`2× tREFI`) | 11,237 | 1,679.4 | 13.12 | 0 | 1,188 |
 | Cross-Die UCIe-S Spill (10%) | 13,544 | 1,393.3 | 9.80 | 0 | 900 |
 | Unswizzled Stride-64 (2/64 banks) | 312,517 | 60.4 | 0.47 | 301,568 | 900 |
@@ -127,3 +128,29 @@
 | :--- | :---: | :---: | :---: | :---: |
 | `divergent_relu_norm.masm` | 12 | 0 / 0 / 1 / 1 | `3.31e-09` | PASS |
 | `fused_fp8_gemm_flash_tile.masm` | 168 | 4 / 2 / 2 / 0 | `5.51e-06` | PASS |
+
+- **20-Step AdamW Convergence Check:** `FP64` ends at `1.1209`, `Mercury FP8` at `1.1218`, and `Hopper-14b` at `1.1236`; FP8 input quantization contributes `27.4%` end-to-end parameter update drift on both, while isolated vs. FP8+FP64-accum step-1 grad error is `3.96e-08` (Mercury) vs. `1.74e-03` (Hopper-14b).
+
+## 7. PCB Physical Courtyard Screening & NRE Volume Amortization (`mercury_sim/physical_bom.py`)
+
+### 7.1 Clamshell GDDR7 Courtyard Fit Screen
+| Form Factor | Board (mm) | Top Fill | Bottom Fill | Max Trace | Fits |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| `standard_oam_2_0_48_chips` | 102×165 | 81.5% | 95.3% | 32.0 mm | REJECTED |
+| `extended_oam_l_140x185_48_chips` | 140×185 | 53.0% | 61.9% | 32.0 mm | PASS |
+| `standard_oam_2_0_96gb_32chips` | 102×165 | 69.4% | 68.2% | 32.0 mm | PASS |
+| `pcie_dual_slot_111x267_24_chips` | 111×267 | 27.2% | 18.8% | 26.5 mm | PASS |
+| `ocp_oam_r2_102x170_48_chips` | 102×170 | 79.1% | 92.5% | 32.0 mm | REJECTED |
+
+### 7.2 Upfront $85M NRE Amortization (`$2,456` Hardware BOM, 45% Gross Margin)
+| Volume (Units) | HW BOM | NRE / Unit | Loaded Unit Cost | 45% GM Target Price | 64-GPU System Capex | 1T-Token $/1M Tok |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| 10,000 | $2,456 | $8,500 | $10,956 | **$19,920** | $1,326,080 | **$0.1013** |
+| 25,000 | $2,456 | $3,400 | $5,856 | **$10,647** | $732,625 | **$0.0601** |
+| 50,000 | $2,456 | $1,700 | $4,156 | **$7,556** | $534,807 | **$0.0464** |
+| 100,000 | $2,456 | $850 | $3,306 | **$6,011** | $435,898 | **$0.0395** |
+| 250,000 | $2,456 | $340 | $2,796 | **$5,084** | $376,553 | **$0.0354** |
+
+## 8. Current Engineering Scope & Not Yet Built
+- **Implemented Here:** Pre-silicon architecture specification, clustered yield/binning model, 2-node electro-thermal RC ODEs, PCB courtyard & NRE amortization, cycle-level architectural crossbar & A-multicast model, PyTorch Transformer FP8 parity + 20-step AdamW convergence, and 32-bit RISC-V `Xmer*` assembler + VM.
+- **Not Yet Built:** Synthesizable SystemVerilog/Chisel RTL + Verilator cycle-accurate simulation, TSMC N4P physical P&R / STA signoff at 1.85 GHz, IBIS/HSPICE SI/PI for 32 Gbps PAM3 GDDR7 & 400GbE SerDes, and production LLVM/Triton MLIR compiler & Linux RDMA drivers.

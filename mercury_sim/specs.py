@@ -198,7 +198,7 @@ MERCURY_1S = MercurySKU(
 
 MERCURY_1D = MercurySKU(
     name="Mercury-1D",
-    form_factor="OCP OAM 2.0 48V Module",
+    form_factor="Extended OAM-L 48V Module (140x185 mm)",
     num_dies=2,
     die_area_mm2=453.8,
     fab_sccs_per_die=84,
@@ -280,7 +280,7 @@ COOLING_PROFILES: dict[str, CoolingProfile] = {
     ),
     "oam_liquid_35c": CoolingProfile(
         name="oam_liquid_35c",
-        description="OCP OAM 2.0 Direct-to-Chip Liquid Coldplate @ 35C Coolant",
+        description="Extended OAM-L Direct-to-Chip Liquid Coldplate @ 35C Coolant",
         ambient_c=35.0,
         r_theta_jc_die=0.025,
         r_theta_ca=0.022,

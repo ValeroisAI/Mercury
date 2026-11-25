@@ -4,6 +4,21 @@ All notable changes to the **Mercury** open-source RISC-V AI Training GPU projec
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.0] - 2026-11-25
+
+### Added
+- **PCB Physical Courtyard & NRE Volume Economics (`mercury_sim/physical_bom.py`):**
+  - Quantified backside + topside courtyard fill across `102×165 mm` OAM v1.5 (`95.3%` overflow), `102×170 mm` OAM r2.0 (`92.5%` overflow), `140×185 mm` **Extended OAM-L** (`53.0% / 61.9%` pass, `32.0 mm` traces), `96 GB / 32-chip` OAM v1.5 fallback (`69.4% / 68.2%` pass), and `111×267 mm` PCIe (`27.2% / 18.8%` pass) (`19` tests in `tests/test_physical_bom.py`).
+  - Added `$85M` NRE (`$35M` masks + `$22M` SerDes/GDDR7/UCIe IP + `$28M` software) amortization curves at 45% gross margin (`$19,920` at `10k` -> `<$10k` at `27,924` -> `<$8k` at `43,725` -> `$6,011` at `100k` -> `$5,084` at `250k`).
+- **Cycle-Level `256×128` A-Multicast & 20-Step PyTorch `AdamW` Convergence (`mercury_sim/`):**
+  - `microarch_cycle.py`: Added `multicast_256x128` (`2,022.0` FP8 TFLOPS, `87.8%` peak, Shared SRAM traffic `11.62 -> 4.36 TB/s`) and aligned terminology to `"cycle-level architectural model"`.
+  - `pytorch_bridge.py`: Added 20-step `torch.optim.AdamW` convergence isolating FP8 quantization (`~27%` update drift) from accumulator rounding (`3.96e-8` vs. `1.74e-3` step-1 grad error; `15` tests in `tests/test_microarch_and_torch.py`).
+- **Interactive Engineering Workbench (`dashboard/`):**
+  - Static HTML/CSS/SVG/JS workbench (`DESIGN.md` token contract) displaying live data from `scripts/export_dashboard_data.py` across light/dark themes and `1440px`/`390px` responsive layouts.
+
+### Changed
+- **Honest Engineering & Scope Boundaries:** Replaced `"Target Street Price"` framing with explicit Hardware-Only BOM vs. NRE amortization, updated `Mercury-1D` form factor to `Extended OAM-L (140×185 mm)`, corrected `0.3.0` `"Cycle-Accurate"` wording to `"Cycle-Level Architectural"`, and documented `"Current Scope & Not Yet Built"` across `README.md`, `docs/`, `scripts/generate_charts.py`, and `scripts/run_qualification.py`.
+
 ## [0.3.0] - 2026-11-25
 
 ### Added

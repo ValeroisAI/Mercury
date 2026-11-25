@@ -95,11 +95,40 @@ def test_microarch_benchmark_hook_is_json_clean():
     report = run_microarch_benchmarks()
     data = json.loads(json.dumps(report))
     assert set(data["scenarios"]) == {
-        "swizzled_baseline", "unswizzled_bank_conflict", "hot_2x_trefi_85c", "cross_die_ucie_spill"}
+        "swizzled_baseline", "unswizzled_bank_conflict", "hot_2x_trefi_85c", "cross_die_ucie_spill",
+        "multicast_256x128"}
     rel = data["relative_to_baseline"]
     assert rel["swizzled_baseline"] == 1.0
-    assert all(rel[k] < 1.0 for k in rel if k != "swizzled_baseline")
+    assert all(rel[k] < 1.0 for k in rel if k not in ("swizzled_baseline", "multicast_256x128"))
     assert 0.5 < data["fraction_of_fp8_peak"]["swizzled_baseline"] < 0.9
+
+
+def test_defaults_are_backward_compatible():
+    r = simulate_scc_cycle_trace(MERCURY_1D)
+    explicit = simulate_scc_cycle_trace(MERCURY_1D, tile_m=128, multicast_a=False)
+    assert r == explicit
+    assert (r.tile_m, r.multicast_a, r.multicast_fanout, r.rf_accumulator_kib) == (128, False, 1, 64.0)
+    assert r.l1_fill_tbs == r.achieved_sram_tbs  # no multicast: every L1 byte is a bank read
+    with pytest.raises(ValueError):
+        simulate_scc_cycle_trace(MERCURY_1D, tile_m=192)
+
+
+def test_multicast_256x128_beats_128x128_baseline():
+    report = run_microarch_benchmarks()
+    base = report["scenarios"]["swizzled_baseline"]
+    opt = report["scenarios"]["multicast_256x128"]
+    assert opt["achieved_tflops"] > base["achieved_tflops"]
+    assert opt["stme_utilization"] > base["stme_utilization"]
+    assert report["relative_to_baseline"]["multicast_256x128"] > 1.1
+    # Multicast: L1 still receives every operand byte, but the banks serve far fewer.
+    assert opt["achieved_sram_tbs"] < 0.5 * opt["l1_fill_tbs"]
+    assert opt["sram_bytes_per_clk_per_scc"] < base["sram_bytes_per_clk_per_scc"]
+    o = report["optimization"]
+    assert o["optimized_256x128_multicast"]["tflops"] >= o["ablation_256x128_no_multicast"]["tflops"]
+    cost = o["complexity_cost"]
+    assert cost["rf_fp32_accumulator_kib_per_scc"] == [64.0, 128.0]
+    assert cost["rf_fp32_accumulator_kib_per_scc"][1] <= cost["rf_budget_kib_per_scc"]
+    assert cost["multicast_fanout"] == 19 and cost["multicast_trees"] == 8
 
 
 # ---------------------------------------------------------------- torch
@@ -130,6 +159,52 @@ def test_torch_forward_and_gradient_parity():
     assert fwd["mercury"]["rel_l2"] < fwd["hopper_14bit"]["rel_l2"]
     assert r["summary"]["mercury_preserves_0p999"]
     assert r["summary"]["mercury_beats_hopper_accumulator_rel_l2"]
+
+
+@pytest.mark.parametrize("mnk", [(3, 5, 256), (4, 7, 16), (2, 130, 300)])
+def test_vectorized_fp8_gemms_are_bit_exact_with_compute_isa(mnk):
+    import torch
+    from mercury_sim.compute_isa import (
+        block_quantize_1x128, block_quantize_128x128, mma_fp8_blk_mercury, mma_fp8_hopper_truncated)
+    from mercury_sim.pytorch_bridge import hopper_fp8_gemm, mercury_fp8_gemm
+    m, n, k = mnk
+    gen = torch.Generator().manual_seed(m * 1000 + n + k)
+    a = torch.randn(m, k, generator=gen, dtype=torch.float64) * torch.exp(
+        torch.randn(m, k, generator=gen, dtype=torch.float64))
+    a[:, ::37] *= 40.0
+    b = torch.randn(k, n, generator=gen, dtype=torch.float64)
+    aq, sa = block_quantize_1x128(a.flatten().tolist(), m, k)
+    bq, sb = block_quantize_128x128(b.flatten().tolist(), k, n)
+    ref_m = torch.tensor(mma_fp8_blk_mercury(aq, sa, bq, sb, m, n, k), dtype=torch.float64).view(m, n)
+    ref_h = torch.tensor(mma_fp8_hopper_truncated(aq, sa, bq, sb, m, n, k), dtype=torch.float64).view(m, n)
+    assert torch.equal(mercury_fp8_gemm(a, b), ref_m)
+    assert torch.equal(hopper_fp8_gemm(a, b), ref_h)
+    fast = mercury_fp8_gemm(a, b, exact_order=False)  # BLAS-order FP32 partials (training path)
+    assert float((fast - ref_m).norm() / ref_m.norm()) < 1e-6
+
+
+def test_fp8_training_loop_converges_and_isolates_accumulator():
+    from mercury_sim.pytorch_bridge import simulate_fp8_training_loop
+    r = simulate_fp8_training_loop(steps=20)
+    assert json.loads(json.dumps(r)) == r
+    paths = r["paths"]
+    assert set(paths) == {"fp64_golden", "fp8_quant_fp64_accum", "mercury_fp8_blk", "hopper_14bit"}
+    for name, p in paths.items():
+        curve = p["loss_curve"]
+        assert len(curve) == 20, name
+        assert curve[-1] < 0.1 * curve[0], name
+        assert sum(b < a for a, b in zip(curve, curve[1:])) >= 18, name  # clean descent
+    merc, hop = paths["mercury_fp8_blk"], paths["hopper_14bit"]
+    assert merc["first_step_grad_cos_sim_vs_fp64"] > 0.999
+    assert merc["final_weight_rel_l2_drift"] < 0.15
+    # FP8 quantization dominates end-to-end drift, and is identical for both FP8 paths ...
+    assert r["attribution"]["dominant_error_source"] == "fp8_quantization"
+    # ... while the accumulator-only error separates them by orders of magnitude.
+    assert merc["first_step_grad_rel_l2_vs_fp8_exact_accum"] < 1e-6
+    assert hop["first_step_grad_rel_l2_vs_fp8_exact_accum"] > 100 * merc["first_step_grad_rel_l2_vs_fp8_exact_accum"]
+    assert merc["update_rel_l2_drift_vs_fp8_exact_accum"] < hop["update_rel_l2_drift_vs_fp8_exact_accum"]
+    with pytest.raises(ValueError):
+        simulate_fp8_training_loop(steps=0)
 
 
 def test_pytorch_bridge_hook_is_json_clean():

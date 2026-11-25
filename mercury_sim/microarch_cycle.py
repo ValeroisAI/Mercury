@@ -1,8 +1,16 @@
-"""Cycle-level Mercury-1 SCC and die memory-controller trace model.
+"""Cycle-level architectural model of a Mercury-1 SCC and its die memory controller.
 
-One SCC runs an FP8 ``m.mma.fp8.blk`` GEMM tile loop. The output tile is
-128 x 128, K moves in groups of 128, and 16 warps each own a 32 x 32
-sub-tile (four 16 x 16 STME accumulators). The model includes:
+This is a Python cycle-level architectural model, not a cycle-accurate
+simulator. The term "cycle-accurate" is kept for future RTL (SystemVerilog
+or Chisel run under Verilator). Latencies and structures are architectural
+assumptions; they have not been validated against silicon or RTL.
+
+One SCC runs an FP8 ``m.mma.fp8.blk`` GEMM tile loop. The default
+output tile is 128 x 128, K moves in groups of 128, and 16 warps each own
+a 32 x 32 sub-tile (four 16 x 16 STME accumulators). ``tile_m=256`` gives
+each warp 64 x 32 (eight accumulators). ``multicast_a`` reads each A-operand
+line once from the Shared SRAM banks and fans it out over a NoC tree to the
+19 SCCs in the same die grid row. The model includes:
 
 * Two RV64 warp schedulers (8 warps each). Each issues at most one
   instruction per cycle, using greedy-then-oldest selection. An explicit
@@ -26,7 +34,7 @@ sub-tile (four 16 x 16 STME accumulators). The model includes:
 
 Timing is event-skipping: when no scheduler can issue, time jumps to the
 earliest scoreboard wake-up. Skipped stall cycles are still counted, so
-each step is cycle-exact.
+skipping does not change the model's cycle counts.
 
 Assumed DRAM timings (JEDEC-class, not vendor-qualified): tRCD+tRP 30 ns,
 tREFI 1.9 us, tRFC 160 ns, 20 ns controller pipeline.
@@ -64,6 +72,9 @@ T_REFI_NS = 1900.0
 T_RFC_NS = 160.0
 DRAM_PIPE_NS = 20.0
 GRID_M = 4                     # SCC grid rows per die (76 SCCs -> 4 x 19)
+NOC_HOP_CYCLES = 2             # per multicast-tree level
+WARP_GRID = 4                  # 4 x 4 warps cover the SCC output tile
+TILE_M_OPTIONS = (128, 256)
 PANEL_BUFFERS = 3              # K-panel ring depth in Shared SRAM
 
 HAZARD_VARIANTS = (None, "dma_before_wait")
@@ -99,6 +110,14 @@ class CycleTraceResult:
     dram_row_hit_rate: float
     hazards_detected: int
     stall_breakdown: tuple[tuple[str, int], ...]
+    tile_m: int = TILE
+    tile_n: int = TILE
+    multicast_a: bool = False
+    l1_fill_tbs: float = 0.0
+    sram_bytes_per_clk_per_scc: float = 0.0
+    rf_accumulator_kib: float = 0.0
+    multicast_fanout: int = 1
+    multicast_tree_latency_cycles: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -215,23 +234,25 @@ class _GDDR7Controller:
 # Warp program and scoreboard
 # --------------------------------------------------------------------------
 
-def build_warp_program(k_groups: int, inject_hazard: str | None = None) -> list[tuple]:
-    """Double-buffered DMA -> LDS -> 4x MMA per K group, then accumulator stores."""
+def build_warp_program(k_groups: int, inject_hazard: str | None = None,
+                       acc_rows: int = 2, acc_cols: int = 2) -> list[tuple]:
+    """Double-buffered DMA -> LDS -> (acc_rows x acc_cols) MMAs per K group, then stores."""
     if inject_hazard not in HAZARD_VARIANTS:
         raise ValueError(f"Unknown hazard variant: {inject_hazard}")
+    rows, cols = range(acc_rows), range(acc_cols)
     prog: list[tuple] = [("DMA", 0)]
     for g in range(k_groups):
         if inject_hazard != "dma_before_wait":
             prog.append(("WAIT", g))
-        for reg in ("a0", "a1", "b0", "b1"):
+        for reg in [f"a{i}" for i in rows] + [f"b{j}" for j in cols]:
             prog.append(("LDS", reg, g))
-        for i in (0, 1):
-            for j in (0, 1):
+        for i in rows:
+            for j in cols:
                 prog.append(("MMA", f"acc{i}{j}", f"a{i}", f"b{j}"))
         if g + 1 < k_groups:  # prefetch next K group while the STMEs stream
             prog.append(("DMA", g + 1))
-    for i in (0, 1):
-        for j in (0, 1):
+    for i in rows:
+        for j in cols:
             prog.append(("STORE", f"acc{i}{j}"))
     return prog
 
@@ -259,8 +280,11 @@ class _Warp:
 class _SCCSim:
     def __init__(self, sku: MercurySKU, k_groups: int, swizzle: bool, hot: bool,
                  ucie_fraction: float, contending: int, inject_hazard: str | None,
-                 strict: bool, ideal_dram: bool = False) -> None:
+                 strict: bool, ideal_dram: bool = False, tile_m: int = TILE,
+                 multicast_a: bool = False) -> None:
         self.sku = sku
+        self.tile_m = tile_m
+        self.multicast_a = multicast_a
         self.ideal_dram = ideal_dram
         self.k_groups = k_groups
         self.clock = sku.nominal_clock_ghz
@@ -269,17 +293,31 @@ class _SCCSim:
         banks = sku.shared_sram_banks_per_die
         self.eff_banks = effective_sram_banks(contending, banks, swizzle)
         ideal_banks = effective_sram_banks(contending, banks, True)
-        self.local_service = 1.0 / min(DMA_PORT_LINES_PER_CYCLE, self.eff_banks / contending)
-        self.ideal_service = 1.0 / min(DMA_PORT_LINES_PER_CYCLE, ideal_banks / contending)
+        grid_n = sku.active_sccs_per_die // GRID_M
+        # A-operand lines: with multicast, one bank read serves the whole grid row.
+        self.mcast_fanout = min(grid_n, contending) if multicast_a else 1
+        self.mcast_latency = (NOC_HOP_CYCLES * math.ceil(math.log2(self.mcast_fanout))
+                              if self.mcast_fanout > 1 else 0)
+        port = 1.0 / DMA_PORT_LINES_PER_CYCLE
+
+        def service(banks_avail: float, cost: float) -> float:
+            return max(port, cost * contending / banks_avail)
+
+        self.service_b = service(self.eff_banks, 1.0)
+        self.service_a = service(self.eff_banks, 1.0 / self.mcast_fanout)
+        self.ideal_b = service(ideal_banks, 1.0)
+        self.ideal_a = service(ideal_banks, 1.0 / self.mcast_fanout)
         if ucie_fraction:
             link_bytes_per_cycle = sku.ucie_s_bidir_tbs * 1000.0 / 2.0 / self.clock
             self.link_service = LINE / (link_bytes_per_cycle / contending)
         else:
             self.link_service = 0.0
         self.dram = _GDDR7Controller(sku, self.clock, hot)
-        grid_n = sku.active_sccs_per_die // GRID_M
-        self.panel_bytes = (GRID_M * TILE + grid_n * TILE) * TILE  # FP8 A + B panels
-        self.lines_per_dma = (2 * TILE * TILE) // LINE // WARPS_PER_SCC
+        self.panel_bytes = (GRID_M * tile_m + grid_n * TILE) * TILE  # FP8 A + B panels
+        self.a_lines_per_dma = tile_m * TILE // LINE // WARPS_PER_SCC
+        self.b_lines_per_dma = TILE * TILE // LINE // WARPS_PER_SCC
+        self.lines_per_dma = self.a_lines_per_dma + self.b_lines_per_dma
+        self.l1_bytes = 0
         stmes = sku.systolic_arrays_per_scc
         self.stme_free = [0.0] * stmes
         self.stme_starts: list[list[float]] = [[] for _ in range(stmes)]
@@ -298,7 +336,9 @@ class _SCCSim:
         self.stme_stream_total = 0.0
         self.hazards = 0
         self.final = 0.0
-        prog = build_warp_program(k_groups, inject_hazard)
+        prog = build_warp_program(k_groups, inject_hazard,
+                                  acc_rows=tile_m // WARP_GRID // STME_DIM,
+                                  acc_cols=TILE // WARP_GRID // STME_DIM)
         self.warps = [_Warp(w, prog) for w in range(WARPS_PER_SCC)]
 
     # -- memory system ------------------------------------------------------
@@ -323,20 +363,24 @@ class _SCCSim:
         avail = t
         token = avail
         f = self.ucie_fraction
-        for _ in range(self.lines_per_dma):
+        for i in range(self.lines_per_dma):
             idx = self.line_counter
             self.line_counter += 1
+            is_a = i < self.a_lines_per_dma
+            self.l1_bytes += LINE
             if f and math.floor((idx + 1) * f) > math.floor(idx * f):
                 grant = max(avail, self.link_free)
                 self.link_free = grant + self.link_service
                 done = self.link_free + UCIE_HOP_CYCLES + XBAR_LATENCY
                 self.ucie_bytes += LINE
             else:
+                svc, ideal = (self.service_a, self.ideal_a) if is_a else (self.service_b, self.ideal_b)
                 grant = max(avail, self.port_free)
-                self.port_free = grant + self.local_service
-                done = self.port_free + XBAR_LATENCY
-                self.bank_conflict += self.local_service - self.ideal_service
-                self.sram_bytes += LINE
+                self.port_free = grant + svc
+                done = self.port_free + XBAR_LATENCY + (self.mcast_latency if is_a else 0)
+                self.bank_conflict += svc - ideal
+                # Bank-side bytes: a multicast A line costs 1/fanout of a bank read per SCC.
+                self.sram_bytes += LINE / self.mcast_fanout if is_a else LINE
             token = max(token, done)
         warp.tokens[g] = token
         self.group_done[g] = max(self.group_done.get(g, 0.0), token)
@@ -456,18 +500,19 @@ class _SCCSim:
 @lru_cache(maxsize=128)
 def _simulate_raw(sku: MercurySKU, k_groups: int, swizzle: bool, hot: bool,
                   ucie_fraction: float, contending: int, inject_hazard: str | None,
-                  strict: bool, ideal_dram: bool = False) -> dict[str, Any]:
+                  strict: bool, ideal_dram: bool = False, tile_m: int = TILE,
+                  multicast_a: bool = False) -> dict[str, Any]:
     sim = _SCCSim(sku, k_groups, swizzle, hot, ucie_fraction, contending, inject_hazard,
-                  strict, ideal_dram)
+                  strict, ideal_dram, tile_m, multicast_a)
     out = sim.run()
     total = out["total_cycles"]
     clk = sim.clock
-    flops = 2 * TILE * TILE * TILE * k_groups
+    flops = 2 * tile_m * TILE * TILE * k_groups
     if ideal_dram:
         stall_dram = 0.0
     else:  # counterfactual attribution: same run with zero-latency, infinite GDDR7
         ideal = _simulate_raw(sku, k_groups, swizzle, hot, ucie_fraction, contending,
-                              inject_hazard, strict, True)
+                              inject_hazard, strict, True, tile_m, multicast_a)
         stall_dram = float(max(0, total - ideal["total_cycles"]))
     dram_bytes = sim.panel_bytes * len(sim.panels)
     stme_active = sim.stme_stream_total / sku.systolic_arrays_per_scc
@@ -484,6 +529,10 @@ def _simulate_raw(sku: MercurySKU, k_groups: int, swizzle: bool, hot: bool,
         "refresh_blocked_cycles": sim.dram.refresh_blocked,
         "dram_row_hit_rate": sim.dram.hits / accesses if accesses else 0.0,
         "hazards": sim.hazards,
+        "l1_fill_tbs": sim.l1_bytes / total * clk * sku.total_active_sccs / 1000.0,
+        "sram_bytes_per_clk_per_scc": sim.sram_bytes / total,
+        "mcast_fanout": sim.mcast_fanout,
+        "mcast_latency": sim.mcast_latency,
     })
     return out
 
@@ -499,8 +548,15 @@ def simulate_scc_cycle_trace(
     contending_sccs: int | None = None,
     inject_hazard: str | None = None,
     strict: bool = False,
+    tile_m: int = TILE,
+    multicast_a: bool = False,
 ) -> CycleTraceResult:
-    """Trace one SCC's FP8 GEMM tile loop (128x128 output, ``k_groups`` x K=128).
+    """Trace one SCC's FP8 GEMM tile loop (tile_m x 128 output, ``k_groups`` x K=128).
+
+    The defaults (``tile_m=128``, ``multicast_a=False``) reproduce the
+    original baseline exactly. ``tile_m=256`` doubles the FP32 accumulator
+    footprint (64 -> 128 KiB of the 256 KiB RF) and halves B re-reads per
+    FLOP. ``multicast_a`` adds a NoC fan-out tree per die grid row.
 
     ``contending_sccs`` (default: all active SCCs on the die) share the
     Shared SRAM crossbar and the UCIe-S link. With ``strict=True``, a DMA
@@ -516,11 +572,17 @@ def simulate_scc_cycle_trace(
     contending = sku.active_sccs_per_die if contending_sccs is None else contending_sccs
     if not 1 <= contending <= sku.active_sccs_per_die:
         raise ValueError("contending_sccs must be within the active SCCs of one die")
+    if tile_m not in TILE_M_OPTIONS:
+        raise ValueError(f"tile_m must be one of {TILE_M_OPTIONS}")
+    acc_kib = tile_m * TILE * 4 / 1024
+    if acc_kib > sku.rf_kib_per_scc:
+        raise ValueError("FP32 accumulator tile exceeds the SCC register file")
     hot = bool(hot_2x_trefi or dram_temp_c >= sku.tmem_double_refresh_c)
     args = (sku, k_groups, hot, float(ucie_d2d_fraction), contending, inject_hazard, strict)
-    raw = _simulate_raw(sku, k_groups, swizzle, *args[2:])
-    sw = raw if swizzle else _simulate_raw(sku, k_groups, True, *args[2:])
-    unsw = raw if not swizzle else _simulate_raw(sku, k_groups, False, *args[2:])
+    extra = (False, tile_m, bool(multicast_a))
+    raw = _simulate_raw(sku, k_groups, swizzle, *args[2:], *extra)
+    sw = raw if swizzle else _simulate_raw(sku, k_groups, True, *args[2:], *extra)
+    unsw = raw if not swizzle else _simulate_raw(sku, k_groups, False, *args[2:], *extra)
     stalls = raw["stalls"]
     total = raw["total_cycles"]
     return CycleTraceResult(
@@ -547,11 +609,19 @@ def simulate_scc_cycle_trace(
         dram_row_hit_rate=raw["dram_row_hit_rate"],
         hazards_detected=raw["hazards"],
         stall_breakdown=tuple(sorted(stalls.items())),
+        tile_m=tile_m,
+        tile_n=TILE,
+        multicast_a=bool(multicast_a),
+        l1_fill_tbs=raw["l1_fill_tbs"],
+        sram_bytes_per_clk_per_scc=raw["sram_bytes_per_clk_per_scc"],
+        rf_accumulator_kib=acc_kib,
+        multicast_fanout=raw["mcast_fanout"],
+        multicast_tree_latency_cycles=raw["mcast_latency"],
     )
 
 
 def run_microarch_benchmarks(sku: MercurySKU = MERCURY_1D, k_groups: int = 16) -> dict[str, Any]:
-    """JSON-serializable comparison of four memory-system scenarios for charts."""
+    """JSON-serializable comparison of memory-system scenarios and one tiling optimization."""
     scenarios = {
         "swizzled_baseline": simulate_scc_cycle_trace(sku, k_groups=k_groups),
         "unswizzled_bank_conflict": simulate_scc_cycle_trace(sku, k_groups=k_groups, swizzle=False),
@@ -561,8 +631,42 @@ def run_microarch_benchmarks(sku: MercurySKU = MERCURY_1D, k_groups: int = 16) -
     if sku.num_dies > 1:
         scenarios["cross_die_ucie_spill"] = simulate_scc_cycle_trace(
             sku, k_groups=k_groups, ucie_d2d_fraction=0.10)
-    base = scenarios["swizzled_baseline"].achieved_tflops
+    # Same K extent (k_groups x 128), twice the output rows per SCC.
+    scenarios["multicast_256x128"] = simulate_scc_cycle_trace(
+        sku, k_groups=k_groups, tile_m=256, multicast_a=True)
+    tile_only = simulate_scc_cycle_trace(sku, k_groups=k_groups, tile_m=256)
+    base_r, opt_r = scenarios["swizzled_baseline"], scenarios["multicast_256x128"]
+    base = base_r.achieved_tflops
     peak = sku.peak_tflops("fp8")
+    grid_rows = GRID_M * sku.num_dies
+
+    def summary(r: CycleTraceResult) -> dict[str, float]:
+        return {"total_cycles": r.total_cycles, "tflops": r.achieved_tflops,
+                "stme_utilization": r.stme_utilization, "sram_bank_tbs": r.achieved_sram_tbs,
+                "l1_fill_tbs": r.l1_fill_tbs, "sram_bytes_per_clk_per_scc": r.sram_bytes_per_clk_per_scc,
+                "dram_tbs": r.achieved_dram_tbs}
+
+    optimization = {
+        "change": "SCC tile 128x128 -> 256x128 plus NoC A-operand multicast per die grid row",
+        "metric": "achieved FP8 TFLOPS (whole SKU) over k_groups x K=128",
+        "baseline_128x128": summary(base_r),
+        "ablation_256x128_no_multicast": summary(tile_only),
+        "optimized_256x128_multicast": summary(opt_r),
+        "speedup_tflops": opt_r.achieved_tflops / base,
+        "complexity_cost": {
+            "rf_fp32_accumulator_kib_per_scc": [base_r.rf_accumulator_kib, opt_r.rf_accumulator_kib],
+            "rf_budget_kib_per_scc": sku.rf_kib_per_scc,
+            "accumulators_per_warp": [4, 8],
+            "l1_operand_double_buffer_kib_per_scc": [2 * 2 * TILE * TILE / 1024,
+                                                     2 * (256 + TILE) * TILE / 1024],
+            "multicast_trees": grid_rows,
+            "multicast_fanout": opt_r.multicast_fanout,
+            "multicast_tree_levels": math.ceil(math.log2(opt_r.multicast_fanout)),
+            "multicast_tree_latency_cycles": opt_r.multicast_tree_latency_cycles,
+            "noc_tree_links_total": grid_rows * (opt_r.multicast_fanout - 1),
+            "unmodeled": "NoC replication buffers, router area/power, multicast flow control",
+        },
+    }
     return {
         "sku": sku.name,
         "k_groups": k_groups,
@@ -571,4 +675,5 @@ def run_microarch_benchmarks(sku: MercurySKU = MERCURY_1D, k_groups: int = 16) -
         "scenarios": {name: r.to_dict() for name, r in scenarios.items()},
         "relative_to_baseline": {name: r.achieved_tflops / base for name, r in scenarios.items()},
         "fraction_of_fp8_peak": {name: r.achieved_tflops / peak for name, r in scenarios.items()},
+        "optimization": optimization,
     }

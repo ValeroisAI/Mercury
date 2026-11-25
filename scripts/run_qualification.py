@@ -62,7 +62,7 @@ def render_markdown_report(results: dict) -> str:
         "",
         "**Thermal Engineering Findings:**",
         "- **`Mercury-1S` (PCIe Air):** Holds full `1.85 GHz` at 25°C ambient; at 35°C hot chassis, backside clamshell GDDR7 stays safe under PMU control.",
-        "- **`Mercury-1D` (OAM):** 4U air at 35°C triggers GDDR7 `2× tREFI` (`>85°C`) and closed-loop DVFS throttling—proving why **OCP OAM 2.0 Direct-to-Chip Liquid** is the production cooling spec (`54.6°C` $T_j$, `68.0°C` $T_{\\text{mem}}$, zero throttling, plus ~42W subthreshold leakage savings).",
+        "- **`Mercury-1D` (Extended OAM-L):** 4U air at 35°C triggers GDDR7 `2× tREFI` (`>85°C`) and closed-loop DVFS throttling—proving why **Extended OAM-L (140×185 mm) Direct-to-Chip Liquid** is the production cooling spec (`54.6°C` $T_j$, `68.0°C` $T_{\\text{mem}}$, zero throttling, plus ~42W subthreshold leakage savings).",
         "- **Fault & Power Virus Safety:** Mid-run pump/fan failure clamps DVFS safely (`peak Tj <= 106°C`), and synthetic `1.28×` power-virus stays clamped below `730W` board limit.",
         "",
         "## 3. Cluster Parallelism, MoE, Link Fault & Decode Honesty (Scenarios 6–8)",
@@ -104,23 +104,26 @@ def render_markdown_report(results: dict) -> str:
         )
 
     from mercury_sim.microarch_cycle import run_microarch_benchmarks
+    from mercury_sim.physical_bom import run_physical_bom_analysis
     from mercury_sim.pytorch_bridge import run_pytorch_bridge_benchmark
     from mercury_isa.vm import run_isa_kernel_benchmarks
 
     micro = run_microarch_benchmarks()
     pt_bench = run_pytorch_bridge_benchmark()
     isa_bench = run_isa_kernel_benchmarks()
+    phys_bom = run_physical_bom_analysis()
 
     lines.extend([
         "",
-        "## 6. Cycle-Accurate SCC Crossbar, PyTorch Parity & Live ISA VM Verification",
+        "## 6. Cycle-Level Architectural Crossbar, PyTorch Parity & Live ISA VM Verification",
         "",
-        "### 6.1 Cycle-Accurate 64-Bank Crossbar & GDDR7 Controller (`128×128×2048` Tile)",
+        "### 6.1 Cycle-Level Architectural 64-Bank Crossbar & GDDR7 Controller",
         "| Mode | Total Cycles | Achieved FP8 TFLOPS | Shared SRAM (TB/s) | Bank Conflict Cycles | DRAM Stall Cycles |",
         "| :--- | :---: | :---: | :---: | :---: | :---: |",
     ])
     for key, label in [
-        ("swizzled_baseline", "XOR-Swizzled Baseline"),
+        ("multicast_256x128", "256×128 + A-Operand Multicast"),
+        ("swizzled_baseline", "128×128 XOR-Swizzled Baseline"),
         ("hot_2x_trefi_85c", "Hot >=85°C (`2× tREFI`)"),
         ("cross_die_ucie_spill", "Cross-Die UCIe-S Spill (10%)"),
         ("unswizzled_bank_conflict", "Unswizzled Stride-64 (2/64 banks)"),
@@ -154,6 +157,49 @@ def render_markdown_report(results: dict) -> str:
         lines.append(
             f"| `{kname}.masm` | {tel['total_cycles_est']} | {tel['stme_insts']} / {tel['dma_ops']} / {tel['coll_ops']} / {tel['divergent_splits']} | `{kdata['max_abs_error']:.2e}` | {'PASS' if kdata['fp64_parity'] else 'FAIL'} |"
         )
+
+    conv = pt_bench.get("training_convergence")
+    if conv:
+        attr = conv["attribution"]
+        fp64_end = conv["paths"]["fp64_golden"]["loss_curve"][-1]
+        merc_end = conv["paths"]["mercury_fp8_blk"]["loss_curve"][-1]
+        hop_end = conv["paths"]["hopper_14bit"]["loss_curve"][-1]
+        lines.extend([
+            "",
+            f"- **20-Step AdamW Convergence Check:** `FP64` ends at `{fp64_end:.4f}`, `Mercury FP8` at `{merc_end:.4f}`, and `Hopper-14b` at `{hop_end:.4f}`; FP8 input quantization contributes `{attr['fp8_quantization_update_drift']*100:.1f}%` end-to-end parameter update drift on both, while isolated vs. FP8+FP64-accum step-1 grad error is `{attr['mercury_first_step_grad_err_vs_fp8_exact_accum']:.2e}` (Mercury) vs. `{attr['hopper_first_step_grad_err_vs_fp8_exact_accum']:.2e}` (Hopper-14b).",
+        ])
+
+    lines.extend([
+        "",
+        "## 7. PCB Physical Courtyard Screening & NRE Volume Amortization (`mercury_sim/physical_bom.py`)",
+        "",
+        "### 7.1 Clamshell GDDR7 Courtyard Fit Screen",
+        "| Form Factor | Board (mm) | Top Fill | Bottom Fill | Max Trace | Fits |",
+        "| :--- | :---: | :---: | :---: | :---: | :---: |",
+    ])
+    for row in phys_bom["pcb_layouts"].values():
+        b_str = f"{row['board_mm'][0]}×{row['board_mm'][1]}"
+        lines.append(
+            f"| `{row['form_factor']}` | {b_str} | {row['top_used_pct']:.1f}% | {row['bottom_used_pct']:.1f}% | {row['max_gddr7_trace_mm']:.1f} mm | {'PASS' if row['fits_physically'] else 'REJECTED'} |"
+        )
+
+    lines.extend([
+        "",
+        "### 7.2 Upfront $85M NRE Amortization (`$2,456` Hardware BOM, 45% Gross Margin)",
+        "| Volume (Units) | HW BOM | NRE / Unit | Loaded Unit Cost | 45% GM Target Price | 64-GPU System Capex | 1T-Token $/1M Tok |",
+        "| :---: | :---: | :---: | :---: | :---: | :---: | :---: |",
+    ])
+    for r in phys_bom["nre_volume_table"]:
+        lines.append(
+            f"| {r['volume_units']:,} | ${r['hardware_bom_usd']:,.0f} | ${r['nre_per_unit_usd']:,.0f} | ${r['fully_loaded_unit_cost_usd']:,.0f} | **${r['target_price_45gm_usd']:,.0f}** | ${r['capex_64gpu_usd']:,.0f} | **${r['campaign_1t_cost_per_1m_tokens_usd']:.4f}** |"
+        )
+
+    lines.extend([
+        "",
+        "## 8. Current Engineering Scope & Not Yet Built",
+        "- **Implemented Here:** Pre-silicon architecture specification, clustered yield/binning model, 2-node electro-thermal RC ODEs, PCB courtyard & NRE amortization, cycle-level architectural crossbar & A-multicast model, PyTorch Transformer FP8 parity + 20-step AdamW convergence, and 32-bit RISC-V `Xmer*` assembler + VM.",
+        "- **Not Yet Built:** Synthesizable SystemVerilog/Chisel RTL + Verilator cycle-accurate simulation, TSMC N4P physical P&R / STA signoff at 1.85 GHz, IBIS/HSPICE SI/PI for 32 Gbps PAM3 GDDR7 & 400GbE SerDes, and production LLVM/Triton MLIR compiler & Linux RDMA drivers.",
+    ])
 
     return "\n".join(lines) + "\n"
 

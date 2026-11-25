@@ -15,7 +15,7 @@ tolerance. The sustained AI training clock target is **1.85 GHz**.
 
 | | Mercury-1S | Mercury-1D (recommended for AI training) |
 | --- | --- | --- |
-| Module | PCIe Gen5 ×16 card | OAM module |
+| Module | PCIe Gen5 ×16 card | Extended OAM-L module (`140×185 mm`) |
 | Dies and active SCCs | 1 die, 76 SCCs | 2 dies, 152 SCCs |
 | Die-to-die interconnect | Single die | 1.2 TB/s bidirectional organic UCIe-S bridge |
 | GDDR7 ECC | 72 GB (67.1 GiB), 384-bit at 32 Gbps, 1.54 TB/s | 144 GB (134.1 GiB), 2 × 384-bit (768-bit) at 32 Gbps, 3.07 TB/s |

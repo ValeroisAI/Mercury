@@ -43,9 +43,9 @@ The qualification command writes the [Markdown report](./docs/verification/quali
 
 ## Architecture
 
-Mercury-1 uses one 453.8 mm² TSMC N4P compute die design across both products, with 84 fabricated and 76 active SCCs per die. The single-die 1S is a PCIe card. The dual-die 1D pairs those dies over a 1.2 TB/s bidirectional organic UCIe-S bridge in an OAM module.
+Mercury-1 uses one 453.8 mm² TSMC N4P compute die design across both products, with 84 fabricated and 76 active SCCs per die. The single-die 1S is a PCIe card. The dual-die 1D pairs those dies over a 1.2 TB/s bidirectional organic UCIe-S bridge in an **Extended OAM-L (`140×185 mm`)** liquid-cooled module (our physical courtyard model rejects standard `102×165/170 mm` OAM at `95.3% / 92.5%` bottom fill with 48 clamshell GDDR7 packages, while offering a `96 GB / 32-chip` OAM v1.5 fallback).
 
-| Design target | 1S (PCIe) | 1D (OAM) |
+| Design target | 1S (PCIe) | 1D (Extended OAM-L) |
 | :--- | ---: | ---: |
 | Active SCCs | 76 | 152 |
 | Dense BF16 (TFLOPS) | 575.9 | 1,151.8 |
@@ -54,7 +54,7 @@ Mercury-1 uses one 453.8 mm² TSMC N4P compute die design across both products, 
 | Bandwidth (TB/s) | 1.54 | 3.07 |
 | Tensor SRAM (MB) | 192 | 384 |
 | TDP target (W) | 340 | 680 |
-| Estimated BOM | $1,238 | $2,456 |
+| Est. Hardware BOM (excl. NRE) | $1,238 | $2,456 |
 
 - **On-chip reuse.** Each SCC has a dedicated 256 KiB register file and a 256 KiB L1 scratchpad. The simulated FlashAttention-3 and SwiGLU schedules cut GDDR7 traffic by 16.85× and 4.40× against the unfused baseline.
 - **Block-FP8 math.** `m.mma.fp8.blk` sums products in deterministic K order and applies one IEEE-754 FP32 fused multiply-add per 128-element group.
@@ -78,9 +78,9 @@ Mercury figures are modeled design targets and estimates. The commercial columns
 | **VRAM (ECC)** | 72 GB (67.1 GiB) GDDR7 | **144 GB (134.1 GiB) GDDR7** | 80 GB HBM3 | 192 GB (180 usable) HBM3e | 32 GB GDDR6 |
 | **Memory Bandwidth** | 1.54 TB/s (384-bit) | **3.07 TB/s (768-bit @ 32 Gbps)** | 3.35 TB/s | 8.0 TB/s | ≈512 GB/s |
 | **Scale-Out Interconnect** | 2 × 400GbE + PCIe Gen5 | **4 × 400GbE (`200 GB/s/dir`) + PCIe Gen5** | NVLink 4 (900 GB/s) | NVLink 5 (1.8 TB/s) | 4 × 800G Ethernet |
-| **Cooling & TDP** | ≈340 W (Air PCIe) | **≈680 W (OCP OAM 2.0 Liquid)** | 700 W | 1,000 W | 300 W |
-| **Est. Manufacturing BOM** | **$1,238** | **$2,456** | ≈$3,320 | $6,400–$6,750 | — |
-| **Target Street / Card Price** | **$2,400** *(est.)* | **$4,700** *(est.)* | $25k–$30k+ | $30k–$40k+ | $1,399 |
+| **Cooling & Form Factor / TDP** | ≈340 W (Air PCIe) | **≈680 W (Extended OAM-L `140×185 mm` Liquid)** | 700 W | 1,000 W | 300 W |
+| **Est. Hardware BOM (excl. NRE)** | **$1,238** | **$2,456** *(+ $85M NRE amortized below)* | ≈$3,320 | $6,400–$6,750 | — |
+| **Vol. Price Floor (45% GM / Ref.)** | **$2,400** *(HW-only)* | **$6,011 @ 100k vol** *(`$19,920` @ 10k; `$4,700` excl. NRE)* | $25k–$30k+ | $30k–$40k+ | $1,399 |
 
 </details>
 
@@ -88,9 +88,10 @@ Mercury figures are modeled design targets and estimates. The commercial columns
 
 These charts come from the Python simulators. The [qualification report](./docs/verification/qualification-report.md) records the ten scenarios and their assumptions.
 
-### Compute and cost
-![Compute Output vs Capital Efficiency](./assets/charts/01_tflops_vs_bom_frontier.png)
-- The Mercury-1D design targets **1,152 dense BF16 TFLOPS** and **2,304 dense FP8 TFLOPS**, compared with H100 reference figures of 989 and 1,979. At the estimated street price, that yields **245.1 dense BF16 TFLOPS per $1,000** in the model.
+### Compute, BOM and NRE economics
+![Compute Output vs NRE Economics](./assets/charts/01_tflops_vs_bom_frontier.png)
+- The Mercury-1D design targets **1,152 dense BF16 TFLOPS** and **2,304 dense FP8 TFLOPS**, compared with H100 reference figures of 989 and 1,979.
+- **Hardware BOM vs. $85M Upfront NRE:** Hardware BOM is **`$2,456`** (**469 BF16 TFLOPS / $1k BOM**). Amortizing `$85M` of N4P masks (`$35M`), SerDes/GDDR7/UCIe IP (`$22M`), and compiler/runtime engineering (`$28M`) at 45% gross margin yields `$19,920`/card at 10k units (`$0.1013/1M` tokens — worse than B200 `$0.0947`), drops below `$10k` at `27,924` units and below `$8k` at `43,725` units, reaches **`$6,011`** at `100k` units (`$0.0395/1M` tokens), and converges toward the hardware-only cost-plus floor (`~$4,700`) at hyperscale volume.
 
 ### Cooling and fault response
 ![Electro-Thermal Transient Qualification](./assets/charts/02_thermal_transient_torture.png)
@@ -101,8 +102,8 @@ These charts come from the Python simulators. The [qualification report](./docs/
 ### FP8 accuracy and SRAM bandwidth
 ![STME Block-FP8 Accuracy, PyTorch Parity and Cycle Trace](./assets/charts/03_fp8_accuracy_and_sram_roofline.png)
 - **Correlated Outlier Stress (`K=1024` / `K=4096`):** `m.mma.fp8.blk` cuts relative L2 error by **18.0×** (`5.83e-5` vs. `1.05e-3`) and **42.0×** (`2.46e-5` vs. `1.03e-3`) compared to 14-bit truncated accumulation.
-- **PyTorch Transformer Block (`512d -> 1024ffn`):** Achieves `>= 0.9996` end-to-end cosine similarity on `Y`, `dX`, and `dW`; isolating the accumulator shows **2,242× (`Y`)**, **1,084× (`dX`)**, and **22.9× (`dW`)** lower accumulator drift than Hopper-14bit (while end-to-end quantized `dX` remains a near-tie dominated by FP8 input quantization).
-- **Cycle-Accurate Crossbar (`128×128×2048` tile):** **XOR SRAM bank swizzling** achieves **1,723.5 TFLOPS** (`74.8%` FP8 peak, `13.47 TB/s` SRAM) vs. **60.4 TFLOPS** unswizzled (`28.5×` collapse onto 2 of 64 banks). Hot `>=85°C 2× tREFI` costs `-2.6%` (`1,679.4 TFLOPS`); `10%` cross-die UCIe spill costs `-19.2%` (`1,393.3 TFLOPS`).
+- **PyTorch Transformer Block (`512d -> 1024ffn` + 20-Step AdamW):** Achieves `>= 0.9996` end-to-end cosine similarity on `Y`, `dX`, and `dW`; isolating the accumulator shows **2,242× (`Y`)**, **1,084× (`dX`)**, and **22.9× (`dW`)** lower accumulator drift than Hopper-14bit. Over 20 `AdamW` training steps (`hidden=256, ffn=512`), loss drops `19.65 -> 1.12` while FP8 input quantization dominates (`~27%` update drift on both), whereas isolated vs. FP8+FP64-accum step-1 grad error is `3.96e-8` (Mercury) vs. `1.74e-3` (Hopper-14b).
+- **Cycle-Level Architectural Crossbar & A-Multicast:** **XOR SRAM bank swizzling** on `128×128` achieves **1,723.5 TFLOPS** (`74.8%` FP8 peak, `13.47 TB/s` SRAM) vs. **60.4 TFLOPS** unswizzled (`28.5×` collapse onto 2 of 64 banks); widening to **`256×128` with an `8×19` A-operand multicast tree** reaches **2,022.0 TFLOPS** (`87.8%` peak, `+17.3%`) while trimming Shared SRAM reads `11.62 -> 4.36 TB/s`. Hot `>=85°C 2× tREFI` costs `-2.6%` (`1,679.4 TFLOPS`); `10%` cross-die UCIe spill costs `-19.2%` (`1,393.3 TFLOPS`).
 
 ### Cluster scaling and training cost
 ![Cluster Scaling, 1T-Token TCO and ISA VM](./assets/charts/04_cluster_scaling_and_tco.png)
@@ -146,14 +147,25 @@ These charts come from the Python simulators. The [qualification report](./docs/
 | :--- | :--- | :--- |
 | [`mercury_sim/specs.py`](./mercury_sim/specs.py) | Locked `Mercury-1S` / `1D` silicon, DVFS & cooling specs | Imported by all modules |
 | [`mercury_sim/thermal_power.py`](./mercury_sim/thermal_power.py) | 2-node thermal ODE, PMU DVFS/PROCHOT, ATE binning, faults | [`tests/test_thermal_power.py`](./tests/test_thermal_power.py) (`7` tests) |
+| [`mercury_sim/physical_bom.py`](./mercury_sim/physical_bom.py) | PCB courtyard keep-out screen (`Extended OAM-L`), `$85M` NRE amortization | [`tests/test_physical_bom.py`](./tests/test_physical_bom.py) (`19` tests) |
 | [`mercury_sim/compute_isa.py`](./mercury_sim/compute_isa.py) | OFP8 codec, `m.mma.fp8.blk` vs. Hopper, 2:4 sparse, L1/RF tiles | [`tests/test_compute_isa.py`](./tests/test_compute_isa.py) (`17` tests) |
-| [`mercury_sim/microarch_cycle.py`](./mercury_sim/microarch_cycle.py) | Cycle-level SCC scoreboard, 64-bank XOR crossbar, GDDR7 `tREFI` | [`tests/test_microarch_and_torch.py`](./tests/test_microarch_and_torch.py) (`9` tests) |
-| [`mercury_sim/pytorch_bridge.py`](./mercury_sim/pytorch_bridge.py) | Real `torch.nn` Transformer block forward & `dW`/`dX` FP8 parity | [`tests/test_microarch_and_torch.py`](./tests/test_microarch_and_torch.py) |
+| [`mercury_sim/microarch_cycle.py`](./mercury_sim/microarch_cycle.py) | Cycle-level SCC scoreboard, 64-bank XOR crossbar, `256×128` multicast | [`tests/test_microarch_and_torch.py`](./tests/test_microarch_and_torch.py) (`15` tests) |
+| [`mercury_sim/pytorch_bridge.py`](./mercury_sim/pytorch_bridge.py) | Real `torch.nn` Transformer parity & 20-step `AdamW` convergence | [`tests/test_microarch_and_torch.py`](./tests/test_microarch_and_torch.py) |
 | [`mercury_sim/cluster_bench.py`](./mercury_sim/cluster_bench.py) | 10-scenario FSDP/TP/MoE, decode honesty & 1T-token TCO | [`tests/test_cluster_bench.py`](./tests/test_cluster_bench.py) (`5` tests) |
 | [`mercury_isa/`](./mercury_isa/) | 32-bit `Xmer*` encoder/decoder, `.masm` assembler & `MercuryVM` | [`tests/test_mercury_isa.py`](./tests/test_mercury_isa.py) (`63` tests) |
+| [`dashboard/`](./dashboard/index.html) | Interactive Engineering Workbench (`1440px`/`390px` light & dark) | [`scripts/export_dashboard_data.py`](./scripts/export_dashboard_data.py) |
 | [`examples/kernels/`](./examples/kernels/) | Runnable `.masm` kernels (`divergent_relu_norm`, `fused_fp8_gemm_flash_tile`) | `run_isa_kernel_benchmarks()` |
-| [`scripts/`](./scripts/) | [`run_qualification.py`](./scripts/run_qualification.py) & [`generate_charts.py`](./scripts/generate_charts.py) | CLI entry points |
+| [`scripts/`](./scripts/) | [`run_qualification.py`](./scripts/run_qualification.py), [`generate_charts.py`](./scripts/generate_charts.py), `export_dashboard_data.py` | CLI entry points |
 | [`docs/`](./docs/) | Research audit, architecture spec, ISA spec & qualification report | Markdown documentation |
+
+## Current scope & not yet built
+
+- **Verified in Python here:** Pre-silicon architecture specification, N4P yield model, 2-node thermal RC ODEs, PCB courtyard keep-out clearance & `$85M` NRE volume curve, cycle-level architectural crossbar & `256×128` A-multicast model, PyTorch Transformer FP8 + `AdamW` convergence, and 32-bit `Xmer*` assembler + VM (`126` pytest tests).
+- **Not yet built (next engineering milestones):**
+  - Synthesizable SystemVerilog or Chisel RTL and Verilator gate/cycle-accurate co-simulation.
+  - TSMC N4P physical place-and-route, static timing analysis (STA) closure at `1.85 GHz`, and IR-drop signoff.
+  - IBIS/HSPICE signal-integrity signoff for `32 Gbps` PAM3 clamshell GDDR7 channels and `400GbE` SerDes.
+  - Production LLVM codegen backend, Triton MLIR lowering passes, and Linux kernel / RoCEv2 user-mode driver.
 
 ## License
 

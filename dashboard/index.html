@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mercury-1 — Open RISC-V AI Accelerator Workbench</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to workbench</a>
+
+  <header class="topbar">
+    <div class="container topbar-inner">
+      <div class="brand">
+        <svg class="brand-mark" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="2" y="2" width="20" height="20" rx="2" fill="none" stroke="currentColor" stroke-width="1.8" />
+          <rect x="6" y="6" width="5" height="12" fill="currentColor" opacity="0.9" />
+          <rect x="13" y="6" width="5" height="12" fill="currentColor" opacity="0.45" />
+          <line x1="11" y1="12" x2="13" y2="12" stroke="currentColor" stroke-width="2" />
+        </svg>
+        <span class="brand-name">Mercury-1</span>
+        <span class="brand-tag">Pre-Silicon Engineering Workbench</span>
+      </div>
+
+      <nav class="nav-links" aria-label="Sections">
+        <a href="#hero">Specs</a>
+        <a href="#workbench">Qualification</a>
+        <a href="#scope">Scope &amp; Limits</a>
+      </nav>
+
+      <div class="topbar-actions">
+        <button id="theme-toggle" class="btn-outline" type="button" aria-pressed="false">
+          Switch theme
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main id="main" class="container">
+    <section id="hero" class="hero">
+      <div class="hero-copy">
+        <p class="status-line">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span>RISC-V <code class="mono">RV64IMAFDC_Zve64f_Zvfbfmin_Xmer*</code> on TSMC N4P (453.8 mm² single mask)</span>
+        </p>
+        <h1>High-TFLOPS open AI training silicon without the HBM3e or CoWoS-L packaging tax</h1>
+        <p class="hero-lead">
+          Mercury-1 pairs a dual-chiplet organic UCIe-S package with wide-bus Clamshell GDDR7,
+          384 MB on-die Shared Tensor SRAM, native IEEE-FP32 block-FP8 accumulation, and 4x400GbE RoCEv2.
+        </p>
+
+        <div class="sku-bar" role="group" aria-label="Select Mercury-1 SKU">
+          <button class="sku-btn is-active" type="button" data-sku="Mercury-1D" aria-pressed="true">
+            Mercury-1D (Extended OAM-L, 144 GB)
+          </button>
+          <button class="sku-btn" type="button" data-sku="Mercury-1S" aria-pressed="false">
+            Mercury-1S (PCIe Gen5, 72 GB)
+          </button>
+        </div>
+
+        <dl id="hero-ledger" class="spec-ledger" aria-live="polite"></dl>
+      </div>
+
+      <div class="hero-visual-col">
+        <figure class="hero-figure">
+          <img
+            src="../assets/mercury-1-hero.jpg"
+            alt="Isometric hardware cutaway of the dual-chiplet Mercury-1D board showing two compute dies, UCIe-S center bridge, GDDR7 packages, and copper cold-plate"
+            width="1440"
+            height="748"
+          />
+          <figcaption id="hero-caption">
+            Mercury-1D conceptual dual-die module: 2x 453.8 mm² N4P chiplets bridged by 1.2 TB/s UCIe-S.
+          </figcaption>
+        </figure>
+
+        <div class="die-budget-card" aria-label="TSMC N4P Single-Mask Die Area Split">
+          <div class="die-budget-head">
+            <span>453.8 mm² N4P Die Floorplan Allocation</span>
+            <span class="mono">82.9 salvaged dies / wafer</span>
+          </div>
+          <div class="die-bar" role="img" aria-label="50.6% SCCs, 12.8% Shared SRAM, 7.4% GDDR7 PHYs, 18.5% IO and UCIe-S, 10.7% NoC">
+            <span style="width:50.6%;background:var(--accent)" title="84 SCCs: 229.4 mm² (50.6%)"></span>
+            <span style="width:12.8%;background:var(--status-pass)" title="192 MB SRAM: 58.2 mm² (12.8%)"></span>
+            <span style="width:7.4%;background:var(--status-warn)" title="GDDR7 PHYs: 33.6 mm² (7.4%)"></span>
+            <span style="width:18.5%;background:var(--ink-primary)" title="PCIe/400GbE/UCIe-S/Cmd: 84.0 mm² (18.5%)"></span>
+            <span style="width:10.7%;background:var(--ink-secondary)" title="NoC/Clock/Grid: 48.6 mm² (10.7%)"></span>
+          </div>
+          <div class="die-legend">
+            <span><i style="background:var(--accent)"></i>84 SCCs (50.6%)</span>
+            <span><i style="background:var(--status-pass)"></i>192 MB SRAM (12.8%)</span>
+            <span><i style="background:var(--status-warn)"></i>GDDR7 PHYs (7.4%)</span>
+            <span><i style="background:var(--ink-primary)"></i>IO &amp; UCIe-S (18.5%)</span>
+            <span><i style="background:var(--ink-secondary)"></i>NoC Grid (10.7%)</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="workbench" class="workbench">
+      <div class="section-head">
+        <div>
+          <h2>Virtual Bring-Up &amp; Qualification Telemetry</h2>
+          <p class="section-sub">Loaded live from verified Python runs (<code class="mono">dashboard/data/qualification.json</code>).</p>
+        </div>
+        <div class="tablist" role="tablist" aria-label="Qualification Benches">
+          <button class="tab-btn is-active" role="tab" aria-selected="true" data-tab="thermal">Thermal &amp; Power</button>
+          <button class="tab-btn" role="tab" aria-selected="false" data-tab="pcb">PCB Courtyard &amp; NRE</button>
+          <button class="tab-btn" role="tab" aria-selected="false" data-tab="microarch">Crossbar &amp; PyTorch</button>
+          <button class="tab-btn" role="tab" aria-selected="false" data-tab="isa">RISC-V Xmer* VM</button>
+        </div>
+      </div>
+
+      <div id="load-state" class="load-banner" hidden></div>
+
+      <!-- Panel 1: Thermal & Power -->
+      <div class="tab-panel is-active" data-panel="thermal" role="tabpanel">
+        <div class="panel-toolbar">
+          <div class="pill-group" id="thermal-buttons" role="group" aria-label="Thermal Scenario">
+            <button class="pill-btn is-active" type="button" data-thermal="oam_liquid_35c" aria-pressed="true">1D Liquid 35°C</button>
+            <button class="pill-btn" type="button" data-thermal="workstation_air_25c" aria-pressed="false">1S Workstation Air 25°C</button>
+            <button class="pill-btn" type="button" data-thermal="server_4u_air_35c" aria-pressed="false">1D 4U Hot Air 35°C</button>
+            <button class="pill-btn" type="button" data-thermal="mid_run_fault_120s" aria-pressed="false">Mid-Run Fault @120s</button>
+          </div>
+          <div id="thermal-readout" class="inline-readout"></div>
+        </div>
+        <div class="svg-chart-wrap">
+          <svg id="thermal-svg" viewBox="0 0 1160 360" role="img" aria-label="Thermal transient waveform chart"></svg>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table" id="thermal-table"></table>
+        </div>
+      </div>
+
+      <!-- Panel 2: PCB Courtyard & NRE -->
+      <div class="tab-panel" data-panel="pcb" role="tabpanel" hidden>
+        <div class="grid-two">
+          <div class="surface-box">
+            <h3>Physical PCB Courtyard Audit</h3>
+            <p class="box-sub">Separates standard OCP OAM (102 mm width) clearance limits from the Extended OAM-L (140x185 mm) module.</p>
+            <div class="table-wrap">
+              <table class="data-table" id="pcb-table"></table>
+            </div>
+          </div>
+          <div class="surface-box">
+            <div class="box-header-inline">
+              <div>
+                <h3>NRE Amortization &amp; Volume Price</h3>
+                <p class="box-sub">Hardware BOM ($2,456) plus $85M mask, IP, and software NRE.</p>
+              </div>
+              <label class="select-label">
+                Volume:
+                <select id="nre-volume-select" class="select-input">
+                  <option value="10000">10k units</option>
+                  <option value="25000">25k units</option>
+                  <option value="50000">50k units</option>
+                  <option value="100000" selected>100k units</option>
+                  <option value="250000">250k units</option>
+                </select>
+              </label>
+            </div>
+            <div id="nre-callout" class="callout-strip"></div>
+            <div class="table-wrap">
+              <table class="data-table" id="nre-table"></table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Panel 3: Crossbar & PyTorch -->
+      <div class="tab-panel" data-panel="microarch" role="tabpanel" hidden>
+        <div class="grid-two">
+          <div class="surface-box">
+            <h3>Cycle-Level Architectural Crossbar &amp; Multicast</h3>
+            <p class="box-sub">64-bank Shared SRAM crossbar + 12-channel GDDR7 controller (128x128 vs. 256x128 A-multicast).</p>
+            <div class="table-wrap">
+              <table class="data-table" id="microarch-table"></table>
+            </div>
+          </div>
+          <div class="surface-box">
+            <h3>PyTorch Transformer Block FP8 Parity &amp; Convergence</h3>
+            <p class="box-sub">Real torch.nn Transformer forward/backward GEMMs + 20-step AdamW convergence.</p>
+            <div class="svg-chart-wrap compact">
+              <svg id="convergence-svg" viewBox="0 0 600 220" role="img" aria-label="20-step training loss convergence chart"></svg>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table" id="pytorch-table"></table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Panel 4: RISC-V Xmer* VM -->
+      <div class="tab-panel" data-panel="isa" role="tabpanel" hidden>
+        <div class="grid-two">
+          <div class="surface-box">
+            <h3>Assembled 32-bit Open RISC-V Kernel Verification</h3>
+            <p class="box-sub">Executed instruction-by-instruction on MercuryVM with strict async DMA/STME hazard-token checks.</p>
+            <div class="table-wrap">
+              <table class="data-table" id="isa-table"></table>
+            </div>
+          </div>
+          <div class="surface-box">
+            <h3>Cluster Parallelism &amp; Batch=1 Decode Boundary</h3>
+            <p class="box-sub">8x/16x Mercury-1D training throughput alongside the honest single-stream B=1 decode ceiling.</p>
+            <div class="table-wrap">
+              <table class="data-table" id="cluster-table"></table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="scope" class="scope-section">
+      <h2>Current Engineering Scope &amp; Not Yet Built</h2>
+      <div class="grid-two">
+        <div class="surface-box">
+          <h3>Verified in This Repository</h3>
+          <ul class="clean-list">
+            <li>Pre-silicon architectural specification, TSMC N4P floorplan, and clustered defect yield models.</li>
+            <li>2-node electro-thermal RC ODE simulator (die junction + backside clamshell GDDR7 + PROCHOT trip).</li>
+            <li>PCB physical courtyard clearance checks (OAM 102 mm rejection vs. 140x185 mm Extended OAM-L) and $85M NRE amortization.</li>
+            <li>Cycle-level architectural crossbar simulator, PyTorch Transformer parity + AdamW convergence, and 32-bit RISC-V Xmer* VM.</li>
+          </ul>
+        </div>
+        <div class="surface-box">
+          <h3>Not Yet Built (Next Silicon Milestones)</h3>
+          <ul class="clean-list">
+            <li>Synthesizable SystemVerilog or Chisel RTL and Verilator gate/cycle-accurate co-simulation.</li>
+            <li>TSMC N4P physical place-and-route, static timing analysis (STA) closure at 1.85 GHz, and IR-drop signoff.</li>
+            <li>IBIS/HSPICE signal-integrity signoff for 32 Gbps PAM3 clamshell GDDR7 channels and 400GbE SerDes.</li>
+            <li>Production LLVM codegen backend, Triton MLIR lowering passes, and Linux kernel/RDMA user-mode driver.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer container">
+    <span>Mercury Open-Source RISC-V AI GPU Architecture (Apache-2.0)</span>
+    <span>Data generated by <code class="mono">scripts/export_dashboard_data.py</code></span>
+  </footer>
+
+  <script src="./app.js" defer></script>
+</body>
+</html>

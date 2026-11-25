@@ -14,6 +14,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from mercury_sim.cluster_bench import run_all_qualification_scenarios
+from mercury_sim.physical_bom import analyze_nre_and_tco
 from mercury_sim.specs import MERCURY_1D, MERCURY_1S
 from mercury_sim.thermal_power import simulate_thermal_run
 
@@ -134,12 +135,12 @@ def _footer(draw: ImageDraw.ImageDraw, note: str, w: int = 1440, h: int = 800) -
 
 
 def build_chart_01(qual: dict[str, Any]) -> None:
-    """Chart 01: Peak Dense BF16/FP8 TFLOPS and AI Training Price-Performance ($/TFLOP)."""
+    """Chart 01: Peak Dense BF16/FP8 TFLOPS and NRE-Amortized Capital Efficiency."""
     img, draw = _new_canvas(1440, 820)
     _header(
         draw,
-        "Compute Output vs. Capital Efficiency: Mercury-1 Beats H100 FLOPS at ~6.3x Lower Pod Capex/TFLOP",
-        "Dense Tensor TFLOPS (left) and BF16 TFLOPS per $1,000 Street/Pod Price (right) — all Mercury figures derived from locked 453.8 mm2 N4P spec",
+        "Compute Output & Economics: 1,152 BF16 TFLOPS With Explicit $2,456 BOM + $85M NRE Curve",
+        "Dense Tensor TFLOPS (left) and BF16 TFLOPS per $1,000 across NRE-amortized production volumes at 45% GM (right)",
         "BENCHMARK 01 · COMPUTE & COST",
     )
 
@@ -190,45 +191,48 @@ def build_chart_01(qual: dict[str, Any]) -> None:
         _text(draw, (x_bar0 + w_fp8 + 8, ry + 11), f"{fp8:,.0f} FP8", F_MONO_B if is_merc else F_MONO, fill=INK_PRIMARY, anchor="lm")
         _text(draw, (x_bar0 + w_bf16 + 8, ry + 34), f"{bf16:,.0f} BF16", F_MONO_B if is_merc else F_MONO, fill=INK_SECONDARY, anchor="lm")
 
-    # Right Card: BF16 TFLOPS per $1,000 Street/Pod Price & BOM
+    # Right Card: BF16 TFLOPS per $1,000 across NRE Volume Amortization & Competitors
     _rrect(draw, (750, 102, 1408, 762), 10, fill=BG_CARD, outline=BORDER, width=1)
-    _text(draw, (772, 122), "Economic Efficiency: Dense BF16 TFLOPS per $1,000 Price", F_SEC, fill=INK_PRIMARY)
-    _text(draw, (772, 146), "Eliminating HBM3e (~$3k+) & CoWoS-L (~$1.1k) unlocks 6.3x more FLOPS/$", F_SMALL, fill=INK_SECONDARY)
+    _text(draw, (772, 122), "Economic Efficiency: Dense BF16 TFLOPS per $1k (BOM vs. NRE)", F_SEC, fill=INK_PRIMARY)
+    _text(draw, (772, 146), "Modeled at 45% GM with $85M NRE amortized over 10k-250k units (vs. HW-only BOM floor)", F_SMALL, fill=INK_SECONDARY)
 
+    nre_map = {r.volume_units: r for r in analyze_nre_and_tco(MERCURY_1D)}
+    bf16_1d = MERCURY_1D.peak_tflops("bf16")
     eff_rows = [
-        ("Tenstorrent Blackhole ($1,399)", 373.0 / 1.399, "GDDR6 / 512 GB/s", False),
-        ("Mercury-1D Target ($4,700)", MERCURY_1D.peak_tflops("bf16") / 4.700, "144GB GDDR7 / 3.07 TB/s", True),
-        ("Mercury-1S Target ($2,400)", MERCURY_1S.peak_tflops("bf16") / 2.400, "72GB GDDR7 / 1.54 TB/s", True),
-        ("RTX 5090 MSRP ($1,999)", 210.0 / 1.999, "32GB GDDR7 / 1.79 TB/s", False),
+        (f"Tenstorrent Blackhole ($1,399)", 373.0 / 1.399, "GDDR6 / 512 GB/s (retail ref.)", False),
+        (f"Mercury-1D @ 250k (${nre_map[250_000].target_price_45gm_usd:,.0f})", bf16_1d / (nre_map[250_000].target_price_45gm_usd / 1000.0), "Incl. $340/u NRE @ 45% GM", True),
+        (f"Mercury-1D @ 100k (${nre_map[100_000].target_price_45gm_usd:,.0f})", bf16_1d / (nre_map[100_000].target_price_45gm_usd / 1000.0), "Incl. $850/u NRE @ 45% GM", True),
+        (f"Mercury-1D @ 25k (${nre_map[25_000].target_price_45gm_usd:,.0f})", bf16_1d / (nre_map[25_000].target_price_45gm_usd / 1000.0), "Incl. $3,400/u NRE @ 45% GM", True),
+        (f"Mercury-1D @ 10k (${nre_map[10_000].target_price_45gm_usd:,.0f})", bf16_1d / (nre_map[10_000].target_price_45gm_usd / 1000.0), "Low-vol NRE burden ($8.5k/u)", True),
         ("NVIDIA B200 Est. ($40,000)", 2250.0 / 40.0, "192GB HBM3e / 8.0 TB/s", False),
         ("NVIDIA H100 Est. ($30,000)", 989.0 / 30.0, "80GB HBM3 / 3.35 TB/s", False),
     ]
     max_eff = 300.0
-    ex0 = 985
-    ew = 325
-    ey0 = 192
-    erow = 66
+    ex0 = 1015
+    ew = 295
+    ey0 = 186
+    erow = 56
     for tick in [0, 50, 100, 150, 200, 250]:
         tx = ex0 + (tick / max_eff) * ew
-        _line(draw, (tx, ey0 - 8), (tx, ey0 + len(eff_rows) * erow - 14), GRID, 1)
-        _text(draw, (tx, ey0 + len(eff_rows) * erow - 4), f"{tick}", F_SMALL, fill=INK_MUTED, anchor="ma")
+        _line(draw, (tx, ey0 - 8), (tx, ey0 + len(eff_rows) * erow - 12), GRID, 1)
+        _text(draw, (tx, ey0 + len(eff_rows) * erow - 2), f"{tick}", F_SMALL, fill=INK_MUTED, anchor="ma")
 
     for idx, (label, val, sub, is_merc) in enumerate(eff_rows):
         ry = ey0 + idx * erow
         c = ACCENT_1D if "1D" in label else (ACCENT_1S if "1S" in label else SLATE_REF)
-        _text(draw, (772, ry + 6), label, F_LABEL_B if is_merc else F_LABEL, fill=INK_PRIMARY)
-        _text(draw, (772, ry + 26), sub, F_SMALL, fill=INK_MUTED)
+        _text(draw, (772, ry + 4), label, F_LABEL_B if is_merc else F_LABEL, fill=INK_PRIMARY)
+        _text(draw, (772, ry + 23), sub, F_SMALL, fill=INK_MUTED)
         bw = max(4, (val / max_eff) * ew)
-        _rrect(draw, (ex0, ry + 6, ex0 + bw, ry + 34), 4, fill=c)
-        _text(draw, (ex0 + bw + 8, ry + 20), f"{val:.1f}", F_MONO_B if is_merc else F_MONO, fill=INK_PRIMARY, anchor="lm")
+        _rrect(draw, (ex0, ry + 6, ex0 + bw, ry + 32), 4, fill=c)
+        _text(draw, (ex0 + bw + 8, ry + 19), f"{val:.1f}", F_MONO_B if is_merc else F_MONO, fill=INK_PRIMARY, anchor="lm")
 
-    # Callout Box: Manufacturing BOM Delta
-    _rrect(draw, (772, 608, 1384, 742), 8, fill=BG_SUBCARD, outline=BORDER, width=1)
-    _text(draw, (792, 622), "Verified BOM Teardown Insight (Memory + Packaging Bottleneck)", F_LABEL_B, fill=INK_PRIMARY)
-    _text(draw, (792, 648), "• NVIDIA B200 BOM (~$6,400-$6,750): ~$3.1k HBM3e + ~$1.1k CoWoS-L vs ~$900 Logic", F_SMALL, fill=INK_SECONDARY)
-    _text(draw, (792, 670), f"• Mercury-1D BOM (${MERCURY_1D.total_bom_usd:,.0f}): $434 Logic + $1,152 GDDR7 + $220 Organic UCIe-S + $650 Board/Test", F_SMALL, fill=ACCENT_1D)
-    _text(draw, (792, 692), f"• Mercury-1S BOM (${MERCURY_1S.total_bom_usd:,.0f}): Same 453.8 mm2 N4P mask -> $217 Silicon + $576 GDDR7", F_SMALL, fill=ACCENT_1S)
-    _text(draw, (792, 714), "• Single-mask dual-die reuse cuts mask NRE and delivers 469 BF16 TFLOPS / $1k BOM", F_SMALL_B, fill=INK_PRIMARY)
+    # Callout Box: Manufacturing BOM vs. NRE Amortization
+    _rrect(draw, (772, 602, 1384, 744), 8, fill=BG_SUBCARD, outline=BORDER, width=1)
+    _text(draw, (792, 616), "Hardware-Only BOM vs. $85M Upfront NRE (Mask + High-Speed IP + SW)", F_LABEL_B, fill=INK_PRIMARY)
+    _text(draw, (792, 642), "• NVIDIA B200 BOM (~$6,400-$6,750): ~$3.1k HBM3e + ~$1.1k CoWoS-L vs ~$900 Logic", F_SMALL, fill=INK_SECONDARY)
+    _text(draw, (792, 664), f"• Mercury-1D HW BOM (${MERCURY_1D.total_bom_usd:,.0f}): $434 Silicon + $1,152 GDDR7 + $220 UCIe-S + $650 Board/Test", F_SMALL, fill=ACCENT_1D)
+    _text(draw, (792, 686), f"• Mercury-1S HW BOM (${MERCURY_1S.total_bom_usd:,.0f}): Same 453.8 mm2 N4P mask (469 BF16 TFLOPS / $1k HW BOM floor)", F_SMALL, fill=ACCENT_1S)
+    _text(draw, (792, 708), "• Break-evens (45% GM): <$10k @ 27,924 units | <$8k @ 43,725 units | $4,700 baseline excl. NRE", F_SMALL_B, fill=INK_PRIMARY)
 
     _footer(draw, "Sources: mercury_sim.specs (TSMC N4P 1.85 GHz) & verified H100/B200/MI300X/RTX5090/Blackhole specs in docs/research/riscv-open-gpu-landscape.md", 1440, 820)
     _save(img, OUT_DIR / "01_tflops_vs_bom_frontier.png")
@@ -404,7 +408,14 @@ def build_chart_03(qual: dict[str, Any], micro: dict[str, Any] | None, pt_bench:
         _text(draw, (74, 638), f"• End-to-End FP8 Cosine Sim:  Fwd Y = {f_m:.6f} · dW = {g_m:.6f} (FP8 quant dominates)", F_MONO, fill=INK_PRIMARY)
         _text(draw, (74, 664), f"• Accumulator-Only Fwd Y Err: Mercury = {acc_f_m:.2e} vs Hopper-14b = {acc_f_h:.2e} ({ratios['forward_Y']:,.0f}x lower)", F_MONO_B, fill=ACCENT_1D)
         _text(draw, (74, 690), f"• Accumulator-Only dW Err:    Mercury = {acc_g_m:.2e} vs Hopper-14b = {acc_g_h:.2e} ({ratios['grad_dW']:.1f}x lower)", F_MONO_B, fill=ACCENT_1D)
-        _text(draw, (74, 716), f"• Autograd Golden Match: max |diff| = {pt_bench['autograd_alignment']['dW_max_abs']:.1e} across 512d->1024ffn block", F_SMALL, fill=INK_SECONDARY)
+        conv = pt_bench.get("training_convergence")
+        if conv:
+            attr = conv["attribution"]
+            l0 = conv["paths"]["mercury_fp8_blk"]["loss_curve"][0]
+            l_end = conv["paths"]["mercury_fp8_blk"]["loss_curve"][-1]
+            _text(draw, (74, 716), f"• 20-step AdamW: loss {l0:.1f}->{l_end:.2f}; isolated step-1 err {attr['mercury_first_step_grad_err_vs_fp8_exact_accum']:.2e} vs {attr['hopper_first_step_grad_err_vs_fp8_exact_accum']:.2e} (quant dominates ~{attr['fp8_quantization_update_drift']*100:.0f}%)", F_SMALL, fill=INK_SECONDARY)
+        else:
+            _text(draw, (74, 716), f"• Autograd Golden Match: max |diff| = {pt_bench['autograd_alignment']['dW_max_abs']:.1e} across 512d->1024ffn block", F_SMALL, fill=INK_SECONDARY)
     else:
         _text(draw, (74, 660), "Run with mercury_sim.pytorch_bridge to populate PyTorch Transformer parity.", F_SMALL, fill=INK_SECONDARY)
 
@@ -431,30 +442,31 @@ def build_chart_03(qual: dict[str, Any], micro: dict[str, Any] | None, pt_bench:
         _rrect(draw, (762, ry + 48, 762 + tw, ry + 66), 3, fill=ACCENT_1D)
         _text(draw, (762 + tw + 8, ry + 57), f"Mercury Tiled: {tiled_b/1e6:.2f} MB  (RF {rf_b/1024:.0f}/256 KiB · L1 {l1_b/1024:.0f}/256 KiB)", F_MONO_B, fill=ACCENT_1D, anchor="lm")
 
-    # Bottom-Right Card: Cycle-Accurate Microarchitecture Trace (Achieved FP8 TFLOPS)
+    # Bottom-Right Card: Cycle-Level Architectural Crossbar & Multicast Model
     _rrect(draw, (740, 448, 1408, 762), 10, fill=BG_CARD, outline=BORDER, width=1)
-    _text(draw, (762, 468), "Cycle-Accurate SCC & 64-Bank Crossbar Throughput (128x128x2048 Tile)", F_SEC, fill=INK_PRIMARY)
-    _text(draw, (762, 492), "XOR SRAM swizzling prevents 28.5x bank collapse; 85°C 2x tREFI (-2.6%) & UCIe spill (-19%) measured", F_SMALL, fill=INK_SECONDARY)
+    _text(draw, (762, 468), "Cycle-Level Architectural Crossbar & A-Multicast (128x128 / 256x128)", F_SEC, fill=INK_PRIMARY)
+    _text(draw, (762, 492), "256x128 multicast reaches 2,022 TFLOPS; XOR swizzle avoids 28.5x bank collapse", F_SMALL, fill=INK_SECONDARY)
 
     if micro and "scenarios" in micro:
         sc = micro["scenarios"]
         modes = [
-            ("XOR-Swizzled SRAM (Nominal)", sc["swizzled_baseline"], EMERALD),
+            ("256x128 + A-Multicast", sc["multicast_256x128"], ACCENT_1D),
+            ("128x128 XOR-Swizzle Nominal", sc["swizzled_baseline"], EMERALD),
             ("Hot >=85°C (2x tREFI GDDR7)", sc["hot_2x_trefi_85c"], AMBER),
-            ("Cross-Die UCIe-S Spill (10%)", sc["cross_die_ucie_spill"], ACCENT_1D),
-            ("Unswizzled Stride-64 (2/64 banks)", sc["unswizzled_bank_conflict"], CRIMSON),
+            ("Cross-Die UCIe-S Spill (10%)", sc["cross_die_ucie_spill"], VIOLET),
+            ("Unswizzled Stride-64 (2/64)", sc["unswizzled_bank_conflict"], CRIMSON),
         ]
-        max_tf = max(m[1]["achieved_tflops"] for m in modes) * 1.10
-        by0 = 532
+        max_tf = max(m[1]["achieved_tflops"] for m in modes) * 1.12
+        by0 = 526
         for idx, (lbl, mdata, col) in enumerate(modes):
-            ry = by0 + idx * 54
+            ry = by0 + idx * 45
             cyc = mdata["total_cycles"]
             tflops = mdata["achieved_tflops"]
             bconf = int(mdata["bank_conflict_cycles"])
-            bw = max(6, (tflops / max_tf) * 195)
-            _text(draw, (762, ry + 5), lbl, F_LABEL_B if idx == 0 else F_LABEL, fill=INK_PRIMARY)
-            _rrect(draw, (995, ry + 3, 995 + bw, ry + 27), 4, fill=col)
-            _text(draw, (995 + bw + 8, ry + 15), f"{tflops:,.1f} TF · {cyc:,} cyc (conf {bconf:,})", F_SMALL_B, fill=INK_PRIMARY, anchor="lm")
+            bw = max(6, (tflops / max_tf) * 190)
+            _text(draw, (762, ry + 5), lbl, F_LABEL_B if idx <= 1 else F_LABEL, fill=INK_PRIMARY)
+            _rrect(draw, (995, ry + 3, 995 + bw, ry + 25), 4, fill=col)
+            _text(draw, (995 + bw + 8, ry + 14), f"{tflops:,.1f} TF · {cyc:,} cyc (conf {bconf:,})", F_SMALL_B, fill=INK_PRIMARY, anchor="lm")
     else:
         _text(draw, (762, 560), "Run with mercury_sim.microarch_cycle to populate cycle traces.", F_SMALL, fill=INK_SECONDARY)
 
@@ -575,12 +587,12 @@ def build_chart_04(qual: dict[str, Any], isa_bench: dict[str, Any] | None) -> No
 
 
 def build_chart_05(qual: dict[str, Any]) -> None:
-    """Chart 05: Proportional Silicon Floorplan & Dual-Chiplet Mercury-1D OAM Architecture Diagram."""
+    """Chart 05: Proportional Silicon Floorplan & Extended OAM-L Topology Diagram."""
     img, draw = _new_canvas(1440, 820)
     _header(
         draw,
-        "Mercury-1 Single-Mask Silicon Floorplan (453.8 mm2 N4P) & Dual-Chiplet OAM 2.0 Topology",
-        "Exact die area breakdown (left) and symmetric 2x384-bit Clamshell GDDR7 + 1.2 TB/s UCIe-S OAM module layout (right)",
+        "Mercury-1 Single-Mask Silicon Floorplan (453.8 mm2 N4P) & Extended OAM-L Topology",
+        "Exact die area breakdown (left) and symmetric 2x384-bit Clamshell GDDR7 on Extended OAM-L (140x185 mm) rejecting 102 mm OAM overflow",
         "ARCHITECTURE 05 · FLOORPLAN & TOPOLOGY",
     )
 
@@ -639,10 +651,10 @@ def build_chart_05(qual: dict[str, Any]) -> None:
     _text(draw, (54, 708), "• Gray = 8 defect-salvage spare SCCs (lifts N4P yield from 64.6% -> 70.9% Murphy / 80.9% MC)", F_SMALL, fill=INK_SECONDARY)
     _text(draw, (54, 730), "• 48.6 mm² (10.7%) top-level 2D mesh NoC, clock tree, and power delivery grid", F_SMALL, fill=INK_SECONDARY)
 
-    # Right Card: Dual-Chiplet OAM Topology
+    # Right Card: Dual-Chiplet Extended OAM-L Topology
     _rrect(draw, (700, 102, 1408, 762), 10, fill=BG_CARD, outline=BORDER, width=1)
-    _text(draw, (722, 122), "Mercury-1D Dual-Chiplet OCP OAM 2.0 48V Module Topology", F_SEC, fill=INK_PRIMARY)
-    _text(draw, (722, 146), "Zero CoWoS-L interposer · Symmetric left/right 384-bit clamshell GDDR7 (<=35 mm traces)", F_SMALL, fill=INK_SECONDARY)
+    _text(draw, (722, 122), "Mercury-1D Dual-Chiplet Extended OAM-L (140x185 mm) Topology", F_SEC, fill=INK_PRIMARY)
+    _text(draw, (722, 146), "Std 102x165/170 OAM overflows (95.3%/92.5% bot); 140x185 fits at 53.0%/61.9% (32mm traces)", F_SMALL, fill=INK_SECONDARY)
 
     # OAM Carrier Board
     _rrect(draw, (734, 186, 1374, 596), 12, fill="#0F172A", outline="#334155", width=2)
@@ -690,9 +702,9 @@ def build_chart_05(qual: dict[str, Any]) -> None:
     _text(draw, (1054, 388), "1.2 TB/s", F_MONO_B, fill=INK_PRIMARY, anchor="mm")
     _text(draw, (1054, 408), "Bidir", F_SMALL, fill=AMBER, anchor="mm")
 
-    # Bottom PCIe Gen5 / OAM Mezzanine
-    _rrect(draw, (880, 580, 1228, 612), 4, fill="#E2E8F0", outline="#475569", width=2)
-    _text(draw, (1054, 596), "PCIe Gen5 x16 Host + OCP OAM 2.0 48V Power Rail", F_SMALL_B, fill=INK_PRIMARY, anchor="mm")
+    # Bottom PCIe Gen5 / Extended OAM-L Mezzanine
+    _rrect(draw, (870, 580, 1238, 612), 4, fill="#E2E8F0", outline="#475569", width=2)
+    _text(draw, (1054, 596), "PCIe Gen5 x16 Host + Extended OAM-L 48V Power Rail", F_SMALL_B, fill=INK_PRIMARY, anchor="mm")
 
     # Combined Spec Callout
     _rrect(draw, (722, 628, 1384, 742), 8, fill=BG_SUBCARD, outline=BORDER, width=1)

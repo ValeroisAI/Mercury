@@ -1,9 +1,9 @@
 # Mercury-1: Open-Source RISC-V AI Training GPU Architecture Specification
 
 > **Status:** Phase 1 Architectural Specification (Pre-RTL Verification)  
-> **Recommended Flagship SKU:** `Mercury-1D` (Dual Unified Die OAM Module, 144 GB GDDR7 ECC, 1,152 BF16 / 2,304 FP8 Dense TFLOPS)  
+> **Recommended Flagship SKU:** `Mercury-1D` (Dual Unified Die **Extended OAM-L `140×185 mm`** Module, 144 GB GDDR7 ECC, 1,152 BF16 / 2,304 FP8 Dense TFLOPS)  
 > **Companion SKU (Same Mask Set):** `Mercury-1S` (Single Die PCIe Gen5 x16 Card, 72 GB GDDR7 ECC, 576 BF16 / 1,152 FP8 Dense TFLOPS)  
-> **Companion Docs:** [RISC-V Open-GPU Research & Claims Audit](../research/riscv-open-gpu-landscape.md) · [ISA, Microarchitecture & Software Stack](./isa-and-software-stack.md)
+> **Companion Docs:** [RISC-V Open-GPU Research & Claims Audit](../research/riscv-open-gpu-landscape.md) · [ISA, Microarchitecture & Software Stack](./isa-and-software-stack.md) · [Qualification Report](../verification/qualification-report.md)
 
 ---
 
@@ -25,7 +25,7 @@ To ensure honest engineering rigor, we sized three distinct physical configurati
 
 | Parameter | Option A: `Mercury-1S` | **Option B: `Mercury-1D` (Recommended)** | Option C: `Mercury-1H` (Rejected) |
 | :--- | :--- | :--- | :--- |
-| **Package & Die Topology** | 1 × Unified Compute Die (Organic BGA, PCIe Gen5 x16) | **2 × Unified Compute Dies (Organic UCIe-S MCM, OAM)** | 2 × HBM-Variant Dies (TSMC CoWoS-L 2.5D Interposer) |
+| **Package & Die Topology** | 1 × Unified Compute Die (Organic BGA, PCIe Gen5 x16) | **2 × Unified Compute Dies (Organic UCIe-S MCM, Extended OAM-L 140×185 mm)** | 2 × HBM-Variant Dies (TSMC CoWoS-L 2.5D Interposer) |
 | **Die Area (per die)** | 453.8 mm² (21.3 × 21.3 mm) | **453.8 mm² (21.3 × 21.3 mm)** *(same mask set as 1S)* | 496.5 mm² (22.3 × 22.3 mm) |
 | **SCCs (Fabricated / Active)** | 84 / 76 | **168 / 152** (84 / 76 per die) | 208 / 192 (104 / 96 per die) |
 | **Sustained Training Clock** | 1.85 GHz | **1.85 GHz** | 1.85 GHz |
@@ -36,8 +36,8 @@ To ensure honest engineering rigor, we sized three distinct physical configurati
 | **External VRAM (ECC)** | 72 GB / 67.1 GiB GDDR7 (384-bit @ 32 Gbps) | **144 GB / 134.1 GiB GDDR7 (2×384-bit = 768-bit @ 32 Gbps)** | 144 GB / 134.1 GiB HBM3e (6×1024-bit @ 9.2 Gbps) |
 | **External Memory Bandwidth** | 1.54 TB/s | **3.07 TB/s** *(upgradeable to 3.46 TB/s @ 36 Gbps)* | 7.07 TB/s |
 | **Scale-Out Networking** | 2 × 400GbE (800 Gbps) + PCIe Gen5 | **4 × 400GbE (1.6 Tbps = 200 GB/s/dir)** + PCIe Gen5 | 4 × 400GbE (1.6 Tbps) + PCIe Gen5 |
-| **Estimated TDP** | ~340 W | **~680 W** *(OCP OAM 2.0 48V)* | ~750 W |
-| **Estimated Manufacturing BOM** | **~$1,238** | **~$2,456** | **~$7,263** |
+| **Estimated TDP** | ~340 W | **~680 W** *(Extended OAM-L 48V, 140×185 mm)* | ~750 W |
+| **Estimated Manufacturing BOM** | **~$1,238** *(HW-only)* | **~$2,456** *(HW-only, excl. $85M NRE)* | **~$7,263** |
 | **BF16 TFLOPS / $1,000 BOM** | **465 TFLOPS/$k** | **469 TFLOPS/$k** | 200 TFLOPS/$k |
 
 ### Why We Recommend `Mercury-1D` + `Mercury-1S` (Single-Mask Family)
@@ -83,7 +83,7 @@ To ensure honest engineering rigor, we sized three distinct physical configurati
                   PCIe Gen5 x16                                   PCIe Gen5 x16 (Host/Aux)
 ```
 
-- **Symmetric PCB Layout:** Die 0 drives 12 GDDR7 channels (`384-bit`, 24 × 24Gb clamshell packages = 72 GB) on the left perimeter; Die 1 drives 12 GDDR7 channels (`384-bit`, 24 × 24Gb clamshell packages = 72 GB) on the right perimeter. No PAM3 memory signals cross between left and right halves.
+- **Symmetric PCB Layout (`Extended OAM-L 140×185 mm` vs. Standard 102 mm OAM Overflow):** Die 0 drives 12 GDDR7 channels (`384-bit`, 24 × 24Gb clamshell packages = 72 GB) on the left perimeter; Die 1 drives 12 GDDR7 channels (`384-bit`, 24 × 24Gb clamshell packages = 72 GB) on the right perimeter so no PAM3 memory signals cross halves. Courtyard keep-out checks in [`mercury_sim/physical_bom.py`](../../mercury_sim/physical_bom.py) reject standard `102×165 mm` OAM v1.5 (`95.3%` bottom fill) and `102×170 mm` OAM r2.0 (`92.5%` bottom fill) when carrying `48` clamshell GDDR7 packages alongside dual packages, 870A 48V VRM banks, and Mirror Mezzanine keep-outs. **Extended OAM-L (`140×185 mm`)** reduces fill to `53.0%` top / `61.9%` bottom (`<=32.0 mm` traces), with a **96 GB (32-chip, 512-bit)** configuration fitting standard `102×165 mm` OAM (`69.4% / 68.2%`) as a slot-compatible fallback.
 - **Organic UCIe-S D2D Bridge:** 12 mm facing beachfront at a conservative **100 GB/s/mm bidirectional** (50 GB/s/mm/dir, standard organic laminate bump pitch 110 µm) delivers **1.2 TB/s bidirectional (600 GB/s each way)** between Die 0 and Die 1 without a silicon interposer.
 
 ---
@@ -117,7 +117,7 @@ To ensure honest engineering rigor, we sized three distinct physical configurati
 | Static Leakage (TSMC N4P) | 43 W | 86 W |
 | GDDR7 DRAM + PAM3 PHYs | 75 W | 150 W |
 | 400GbE SerDes + PCIe + D2D | 44 W | 88 W |
-| **Rounded Thermal Design Power (TDP)** | **340 W** (Air-cooled PCIe) | **680 W** (OCP OAM 2.0 48V Direct-to-Chip Liquid / High-CFM Air) |
+| **Rounded Thermal Design Power (TDP)** | **340 W** (Air-cooled PCIe) | **680 W** (Extended OAM-L `140×185 mm` 48V Direct-to-Chip Liquid / High-CFM Air) |
 
 ### 5.2 Manufacturing Bill of Materials (BOM) vs. Commercial Incumbents
 
@@ -128,8 +128,10 @@ To ensure honest engineering rigor, we sized three distinct physical configurati
 | **Package Substrate / Interposer** | $90 (Organic) | $220 (Organic UCIe-S) | ~$450 (CoWoS-S est.) | ~$1,100 (CoWoS-L) |
 | **PCB, 600–750W VRM, Cooler/OAM** | $240 | $420 | ~$500 | ~$1,100–$1,400 |
 | **OSAT Assembly, Burn-In & Test** | $115 | $230 | ~$150–$200 | ~$300 |
-| **Total Estimated Manufacturing BOM** | **~$1,238** | **~$2,456** | **~$3,320** *(Known est.)* | **~$6,400–$6,750** *(Known est.)* |
-| **Target Street / Cluster Price** | **~$2,400** *(~48% GM)* | **~$4,700** *(~48% GM)* | ~$25,000–$30,000+ | ~$30,000–$40,000+ |
+| **Total Estimated Hardware BOM** | **~$1,238** | **~$2,456** | **~$3,320** *(Known est.)* | **~$6,400–$6,750** *(Known est.)* |
+| **HW-Only Volume Floor (excl. NRE)** | **~$2,400** *(cost-plus ref.)* | **~$4,700** *(steady-state excl. $85M NRE)* | ~$25,000–$30,000+ | ~$30,000–$40,000+ |
+
+*(NRE Disclosure: Amortizing `$85M` in N4P masks, SerDes/GDDR7/UCIe IP, and software engineering at 45% gross margin yields `$19,920` at 10k units, `<$10,000` past 27,924 units, `<$8,000` past 43,725 units, `$6,011` at 100k units, and `$5,084` at 250k units; see [`mercury_sim/physical_bom.py`](../../mercury_sim/physical_bom.py).)*
 
 ---
 
@@ -163,11 +165,11 @@ To ensure honest engineering rigor, we sized three distinct physical configurati
 
 | Risk Area | Root Cause | Mitigation & Phase 2 Verification Plan |
 | :--- | :--- | :--- |
-| **GDDR7 SI / Thermal Density** | 48 clamshell PAM3 chips @ 32 Gbps near 680W TDP | Enforce strict symmetric 2×384-bit edge routing (≤ 35 mm channels); target **OCP OAM 2.0 48V DC** power rails with direct-to-chip cold-plate liquid cooling (standard for 700W–1000W+ OAM trays). |
+| **GDDR7 SI / PCB Courtyard Density** | 48 clamshell PAM3 chips @ 32 Gbps near 680W TDP on std 102 mm OAM | Adopt **Extended OAM-L (`140×185 mm`)** (`53.0% / 61.9%` courtyard fill, `<=32.0 mm` symmetric traces) with direct-to-chip 48V liquid cold-plate cooling; keep 96 GB / 32-chip `102×165 mm` OAM as standard-envelope fallback. |
 | **Triton / PyTorch Compiler Maturity** | Non-CUDA ecosystems lose 20–40% real MFU to kernel gaps | Build **Phase 2 Behavioral/Roofline Simulator + MLIR/Triton Kernel Lowering Prototype** + reference FlashAttention/Block-FP8 GEMM microbenchmarks before RTL freeze. |
 | **Small-Batch Inference Decode Ceiling** | 3.07 TB/s GDDR7 lags H200 (4.8 TB/s) and B200 (8.0 TB/s) on batch=1 decode | `Mercury-1` targets **high-arithmetic-intensity AI training & batched inference**, where 384 MB on-die SRAM + 144 GB capacity keeps compute units saturated. |
 
-### Proposed Phase 2 Modules (Pending User Review & Approval)
-1. **Executable Physics, Roofline & Training Simulator (`python`):** Parameterized cycle-approximate workload simulator modeling FlashAttention, Block-FP8 GEMM, FSDP/TP/PP overlap, and BOM sensitivity.
-2. **RISC-V `Mercury-1` SCC & Systolic RTL Prototype (`SystemVerilog` or `Chisel`):** Synthesizable single-SCC + `16×16` Block-FP8 STME with full FP32 accumulator + hardware verification testbench.
-3. **Interactive Architecture Explorer Dashboard (Web UI):** Live Roofline, Die Floorplan, Memory Hierarchy, and Cluster $/TFLOP TCO comparator backed by the simulator outputs.
+### Current Scope & Not Yet Built (Silicon Milestones)
+1. **Verified in This Repo (`mercury_sim/`, `mercury_isa/`, `dashboard/`):** Pre-silicon specs, clustered yield, 2-node thermal ODEs, PCB courtyard & $85M NRE amortization, cycle-level architectural crossbar + A-multicast simulator, PyTorch Transformer FP8 + AdamW convergence, 32-bit `Xmer*` assembler/VM, and interactive workbench.
+2. **Not Yet Built — RTL & Physical Signoff:** Synthesizable SystemVerilog or Chisel RTL + Verilator cycle-accurate co-simulation, TSMC N4P place-and-route / STA timing closure at `1.85 GHz`, and IBIS/HSPICE SI/PI signoff for `32 Gbps` PAM3 GDDR7 & `400GbE` SerDes.
+3. **Not Yet Built — Compiler & Driver Stack:** Production LLVM `Xmer*` backend, Triton MLIR lowering passes, and Linux kernel / RoCEv2 user-mode driver.
