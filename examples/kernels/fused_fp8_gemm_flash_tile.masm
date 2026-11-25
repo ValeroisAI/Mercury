@@ -1,0 +1,24 @@
+# Decode-sized attention: one query, 32 keys, 128 FP8 head elements.
+# x2/x3 name DMA descriptor bundles including payloads and scales.
+# t0/t1/t2 = QK accumulator/Q/K-transposed. t3/t4/t5 = PV accumulator/P/V.
+# x4/x5/x7 = L1 score/probability/PV addresses. x6=lane mask 1, x9=output.
+    m.dma.copy x8, x2             # GDDR7 -> Shared Tensor SRAM
+    m.dma.wait x8
+    m.dma.copy x8, x3             # Shared Tensor SRAM -> L1
+    m.dma.wait x8
+    m.mma.fp8.blk t0, t1, t2
+    m.mma.wait t0
+    vle32.v v1, (x4)
+    m.allreduce.max v2, v1
+    vfsub.vv v1, v1, v2
+    vfexp.v v1, v1
+    m.allreduce.sum v3, v1
+    vfcvt.bf16.f.v v4, v1
+    vse16.v v4, (x5)
+    m.mma.bf16 t3, t4, t5
+    m.mma.wait t3
+    m.tmc x6
+    vle32.v v5, (x7)
+    vfdiv.vv v5, v5, v3
+    vse32.v v5, (x9)
+    ret

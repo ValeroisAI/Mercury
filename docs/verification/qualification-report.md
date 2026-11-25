@@ -104,3 +104,26 @@
 | 64x Mercury-1D (400GbE OAM Liquid) | $352,000 | 63.2 kW | 76.0 d | $9,226 | $33,672 | **$0.0337** |
 | 64x NVIDIA H100 SXM (NVLink4 + IB) | $1,920,000 | 70.8 kW | 91.4 d | $12,418 | $172,649 | **$0.1726** |
 | 64x NVIDIA B200 (NVLink5 + IB) | $2,560,000 | 97.9 kW | 37.5 d | $7,051 | $94,742 | **$0.0947** |
+
+## 6. Cycle-Accurate SCC Crossbar, PyTorch Parity & Live ISA VM Verification
+
+### 6.1 Cycle-Accurate 64-Bank Crossbar & GDDR7 Controller (`128×128×2048` Tile)
+| Mode | Total Cycles | Achieved FP8 TFLOPS | Shared SRAM (TB/s) | Bank Conflict Cycles | DRAM Stall Cycles |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| XOR-Swizzled Baseline | 10,949 | 1,723.5 | 13.47 | 0 | 900 |
+| Hot >=85°C (`2× tREFI`) | 11,237 | 1,679.4 | 13.12 | 0 | 1,188 |
+| Cross-Die UCIe-S Spill (10%) | 13,544 | 1,393.3 | 9.80 | 0 | 900 |
+| Unswizzled Stride-64 (2/64 banks) | 312,517 | 60.4 | 0.47 | 301,568 | 900 |
+
+### 6.2 PyTorch Transformer Block (`512d → 1024ffn`, Correlated Outliers)
+| GEMM | Mercury Cos Sim | Hopper-14b Cos Sim | Accumulator-Only Rel L2 (Mercury vs. Hopper) | Accumulator Ratio |
+| :--- | :---: | :---: | :---: | :---: |
+| Forward `Y = X Wg^T` | 0.999813 | 0.999813 | `4.41e-08` vs. `9.89e-05` | **2,241.6× lower** |
+| Input Grad `dX = dY Wg` | 0.999597 | 0.999597 | `6.04e-08` vs. `6.55e-05` | **1,083.9× lower** |
+| Weight Grad `dW = dY^T X` | 0.999969 | 0.999969 | `3.02e-08` vs. `6.92e-07` | **22.9× lower** |
+
+### 6.3 Live Open RISC-V `Xmer*` `.masm` Kernel Execution (`MercuryVM`)
+| Kernel | Est. Cycles | STME / DMA / Coll / Split | Max Abs Err vs. FP64 | Parity |
+| :--- | :---: | :---: | :---: | :---: |
+| `divergent_relu_norm.masm` | 12 | 0 / 0 / 1 / 1 | `3.31e-09` | PASS |
+| `fused_fp8_gemm_flash_tile.masm` | 168 | 4 / 2 / 2 / 0 | `5.51e-06` | PASS |

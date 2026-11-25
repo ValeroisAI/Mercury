@@ -103,6 +103,58 @@ def render_markdown_report(results: dict) -> str:
             f"| {t.system_name} | ${t.capex_usd:,.0f} | {t.cluster_wall_power_kw:.1f} kW | {t.training_days:.1f} d | ${t.energy_cost_usd:,.0f} | ${t.total_campaign_cost_usd:,.0f} | **${t.cost_per_million_tokens_usd:.4f}** |"
         )
 
+    from mercury_sim.microarch_cycle import run_microarch_benchmarks
+    from mercury_sim.pytorch_bridge import run_pytorch_bridge_benchmark
+    from mercury_isa.vm import run_isa_kernel_benchmarks
+
+    micro = run_microarch_benchmarks()
+    pt_bench = run_pytorch_bridge_benchmark()
+    isa_bench = run_isa_kernel_benchmarks()
+
+    lines.extend([
+        "",
+        "## 6. Cycle-Accurate SCC Crossbar, PyTorch Parity & Live ISA VM Verification",
+        "",
+        "### 6.1 Cycle-Accurate 64-Bank Crossbar & GDDR7 Controller (`128×128×2048` Tile)",
+        "| Mode | Total Cycles | Achieved FP8 TFLOPS | Shared SRAM (TB/s) | Bank Conflict Cycles | DRAM Stall Cycles |",
+        "| :--- | :---: | :---: | :---: | :---: | :---: |",
+    ])
+    for key, label in [
+        ("swizzled_baseline", "XOR-Swizzled Baseline"),
+        ("hot_2x_trefi_85c", "Hot >=85°C (`2× tREFI`)"),
+        ("cross_die_ucie_spill", "Cross-Die UCIe-S Spill (10%)"),
+        ("unswizzled_bank_conflict", "Unswizzled Stride-64 (2/64 banks)"),
+    ]:
+        m = micro["scenarios"][key]
+        lines.append(
+            f"| {label} | {m['total_cycles']:,} | {m['achieved_tflops']:,.1f} | {m['achieved_sram_tbs']:.2f} | {int(m['bank_conflict_cycles']):,} | {int(m['dram_stall_cycles']):,} |"
+        )
+
+    lines.extend([
+        "",
+        "### 6.2 PyTorch Transformer Block (`512d → 1024ffn`, Correlated Outliers)",
+        "| GEMM | Mercury Cos Sim | Hopper-14b Cos Sim | Accumulator-Only Rel L2 (Mercury vs. Hopper) | Accumulator Ratio |",
+        "| :--- | :---: | :---: | :---: | :---: |",
+    ])
+    ratios = pt_bench["summary"]["accumulator_error_ratio_hopper_over_mercury"]
+    for gkey, glabel in [("forward_Y", "Forward `Y = X Wg^T`"), ("grad_dX", "Input Grad `dX = dY Wg`"), ("grad_dW", "Weight Grad `dW = dY^T X`")]:
+        g = pt_bench["gemms"][gkey]
+        lines.append(
+            f"| {glabel} | {g['mercury']['cos_sim']:.6f} | {g['hopper_14bit']['cos_sim']:.6f} | `{g['mercury_accumulator_only']['rel_l2']:.2e}` vs. `{g['hopper_accumulator_only']['rel_l2']:.2e}` | **{ratios[gkey]:,.1f}× lower** |"
+        )
+
+    lines.extend([
+        "",
+        "### 6.3 Live Open RISC-V `Xmer*` `.masm` Kernel Execution (`MercuryVM`)",
+        "| Kernel | Est. Cycles | STME / DMA / Coll / Split | Max Abs Err vs. FP64 | Parity |",
+        "| :--- | :---: | :---: | :---: | :---: |",
+    ])
+    for kname, kdata in isa_bench.items():
+        tel = kdata["telemetry"]
+        lines.append(
+            f"| `{kname}.masm` | {tel['total_cycles_est']} | {tel['stme_insts']} / {tel['dma_ops']} / {tel['coll_ops']} / {tel['divergent_splits']} | `{kdata['max_abs_error']:.2e}` | {'PASS' if kdata['fp64_parity'] else 'FAIL'} |"
+        )
+
     return "\n".join(lines) + "\n"
 
 

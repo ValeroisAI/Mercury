@@ -1,0 +1,15 @@
+# 32 lanes, one FP32 vector. x2=input, x3=lane's signed predicate address,
+# x4=output; v31 holds the smallest normal FP32 denominator.
+    vle32.v v1, (x2)
+    ld x5, 0(x3)
+    m.split x5, inactive, merge
+    jal x0, merge                 # positive lane: keep its input
+inactive:
+    vfmax.vv v1, v1, v30          # v30 is zero
+merge:
+    m.join
+    m.allreduce.sum v2, v1
+    vfmax.vv v2, v2, v31
+    vfdiv.vv v3, v1, v2
+    vse32.v v3, (x4)
+    ret
