@@ -18,6 +18,26 @@ python scripts/check_sram_rtl.py --yosys build/rtl-env/Scripts/yowasp-yosys.exe
 
 The default RTL has eight requesters, 64 banks and 22-bit line addresses. The bank mapping follows the Python [cycle model](../../mercury_sim/microarch_cycle.py). For 64 banks, XOR the low six bits with the corresponding bits after shifts of six and thirteen. The physical row preserves the high address bits, so a specified row and bank uniquely identify a logical line. SWIZZLE is a build-time parameter.
 
-The [formal harness](../../tests/rtl/sram_arbiter_tb.sv) proves the swizzled and linear mappings reversible for arbitrary 22-bit addresses with 64 banks. The separate arbitration harness checks four requesters and four banks across seven clock steps from reset. It checks destination selection, address preservation, issue and grant correspondence, and round-robin progression for a continuously contended bank with arbitrary backpressure.
+The [formal harness](../../tests/rtl/sram_arbiter_tb.sv) proves the swizzled and linear mappings reversible for arbitrary 22-bit addresses with 64 banks. The separate arbitration harness checks four requesters and four banks across seven clock steps from reset. It checks destination selection, address preservation, issue and grant correspondence, independent circular priority for arbitrary contenders, and round-robin progression under arbitrary backpressure.
+
+## Parallel priority selection
+
+Each bank selects the lowest eligible requester ID at or above its pointer,
+then wraps to the lowest eligible ID if that range is empty. A one-hot winner
+selects the physical row and contributes to each requester's grant through
+a reduction over banks.
+
+At the default configuration, Yosys 0.71
+`synth -top mercury_sram_arbiter -flatten -noabc; ltp -noff; stat`
+reported **214,673 → 25,712 generic cells** and **1,561 → 26 topological
+levels**. The original serial scan used dynamically indexed writes to the
+shared grant vector. The parallel selector uses per-bank masks and fixed
+reductions with the same pointer state and acceptance cycle. The
+[FPGA mapping](./fpga-mapping.md) now completes for the full arbiter.
+
+For the default eight-requester, 64-bank configuration, Yosys proved all
+2,056 comparison points against the serial arbiter in commit `7b71432`
+with `equiv_simple` followed by `equiv_induct -seq 2`. The four-bank
+harness starts at reset and independently checks circular priority.
 
 This is an RTL prototype for one part of the SCC memory path. Request decode, arbitration, and row selection share a combinational path. SRAM macros, response and write-data networks, ECC, pipeline partitioning, physical timing closure, and accelerator-level integration remain open. Generic elaboration provides structural evidence and leaves PPA unmeasured.

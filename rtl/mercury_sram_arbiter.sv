@@ -14,19 +14,17 @@ module mercury_sram_arbiter #(
     input wire [REQUESTERS-1:0] req_valid,
     input wire [REQUESTERS*LINE_ADDR_BITS-1:0] req_line,
     input wire [BANKS-1:0] bank_ready,
-    output reg [REQUESTERS-1:0] req_grant,
-    output reg [BANKS-1:0] bank_issue,
-    output reg [BANKS*OWNER_BITS-1:0] bank_owner,
-    output reg [BANKS*ROW_BITS-1:0] bank_row
+    output wire [REQUESTERS-1:0] req_grant,
+    output wire [BANKS-1:0] bank_issue,
+    output wire [BANKS*OWNER_BITS-1:0] bank_owner,
+    output wire [BANKS*ROW_BITS-1:0] bank_row
 );
     // REQUESTERS and BANKS are powers of two >= 2, and ROW_BITS > 0.
-    // Truncation of pointer + offset implements round-robin wrap.
     reg [OWNER_BITS-1:0] next_owner [0:BANKS-1];
     wire [BANK_BITS-1:0] target_bank [0:REQUESTERS-1];
     wire [ROW_BITS-1:0] target_row [0:REQUESTERS-1];
-    reg [OWNER_BITS-1:0] owner;
-    integer bank, offset, index;
-    genvar i;
+    wire [BANKS-1:0] wins [0:REQUESTERS-1];
+    genvar i, bank, requester, bit_index;
 
     for (i = 0; i < REQUESTERS; i = i + 1) begin: decode
         mercury_sram_bank_map #(
@@ -36,36 +34,51 @@ module mercury_sram_arbiter #(
             .bank(target_bank[i]),
             .row(target_row[i])
         );
+        assign req_grant[i] = |wins[i];
     end
 
-    always @* begin
-        req_grant = 0;
-        bank_issue = 0;
-        bank_owner = 0;
-        bank_row = 0;
-        owner = 0;
-        for (bank = 0; bank < BANKS; bank = bank + 1) begin
-            for (offset = 0; offset < REQUESTERS; offset = offset + 1) begin
-                owner = next_owner[bank] + OWNER_BITS'(offset);
-                if (!rst && bank_ready[bank] && !bank_issue[bank] &&
-                    req_valid[owner] && target_bank[owner] == BANK_BITS'(bank)) begin
-                    req_grant[owner] = 1;
-                    bank_issue[bank] = 1;
-                    bank_owner[bank*OWNER_BITS +: OWNER_BITS] = owner;
-                    // Keeping the upper address bits makes the XOR map
-                    // bijective. The inverse can recover the low bank bits.
-                    bank_row[bank*ROW_BITS +: ROW_BITS] = target_row[owner];
-                end
+    for (bank = 0; bank < BANKS; bank = bank + 1) begin: select_bank
+        wire [REQUESTERS-1:0] contenders, at_or_after, eligible, winner;
+        for (requester = 0; requester < REQUESTERS; requester = requester + 1) begin: select_request
+            assign contenders[requester] = req_valid[requester] &&
+                target_bank[requester] == BANK_BITS'(bank);
+            assign at_or_after[requester] = contenders[requester] &&
+                OWNER_BITS'(requester) >= next_owner[bank];
+            if (requester == 0) begin
+                assign winner[requester] = eligible[requester];
+            end else begin
+                assign winner[requester] = eligible[requester] && !(|eligible[requester-1:0]);
             end
+            assign wins[requester][bank] = winner[requester];
         end
-    end
 
-    always @(posedge clk) begin
-        for (index = 0; index < BANKS; index = index + 1) begin
+        // First scan IDs at or above the pointer, then wrap to the lowest
+        // contender. Prefix reductions select a one-hot winner in parallel.
+        assign eligible = rst || !bank_ready[bank] ? 0 :
+            |at_or_after ? at_or_after : contenders;
+        assign bank_issue[bank] = |winner;
+
+        for (bit_index = 0; bit_index < OWNER_BITS; bit_index = bit_index + 1) begin: encode_owner
+            wire [REQUESTERS-1:0] owner_bits;
+            for (requester = 0; requester < REQUESTERS; requester = requester + 1) begin: encode_bit
+                assign owner_bits[requester] = winner[requester] && ((requester >> bit_index) & 1) != 0;
+            end
+            assign bank_owner[bank*OWNER_BITS + bit_index] = |owner_bits;
+        end
+
+        for (bit_index = 0; bit_index < ROW_BITS; bit_index = bit_index + 1) begin: select_row
+            wire [REQUESTERS-1:0] row_bits;
+            for (requester = 0; requester < REQUESTERS; requester = requester + 1) begin: select_bit
+                assign row_bits[requester] = winner[requester] && target_row[requester][bit_index];
+            end
+            assign bank_row[bank*ROW_BITS + bit_index] = |row_bits;
+        end
+
+        always @(posedge clk) begin
             if (rst)
-                next_owner[index] <= 0;
-            else if (bank_issue[index])
-                next_owner[index] <= bank_owner[index*OWNER_BITS +: OWNER_BITS] + 1'b1;
+                next_owner[bank] <= 0;
+            else if (bank_issue[bank])
+                next_owner[bank] <= bank_owner[bank*OWNER_BITS +: OWNER_BITS] + 1'b1;
         end
     end
 endmodule

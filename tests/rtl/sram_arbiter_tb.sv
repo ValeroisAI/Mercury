@@ -15,6 +15,11 @@ module sram_arbiter_tb (
     reg [3:0] eligible;
     integer bank, requester;
     integer issued_owner;
+    reg [1:0] next_expected [0:3];
+    reg [1:0] winner [0:3];
+    integer distance, candidate;
+    integer update;
+    reg arbitrary_initialized = 0;
 
     mercury_sram_arbiter #(.REQUESTERS(4), .BANKS(4), .LINE_ADDR_BITS(8)) arbitrary_traffic (
         clk, rst, valid, lines, ready, grant, issue, owner, row
@@ -29,20 +34,45 @@ module sram_arbiter_tb (
         expected_grant = 0;
         eligible = 0;
         issued_owner = 0;
+        candidate = 0;
         for (bank = 0; bank < 4; bank = bank + 1) begin
+            winner[bank] = 0;
             for (requester = 0; requester < 4; requester = requester + 1)
                 eligible[requester] = valid[requester] &&
                     reference_bank(lines[requester*8 +: 8]) == 2'(bank);
+            // Pick the nearest contender in circular order. Iterate backward
+            // so the closest contender overrides the rest.
+            for (distance = 3; distance >= 0; distance = distance - 1) begin
+                candidate = (int'(next_expected[bank]) + distance) % 4;
+                if (eligible[candidate])
+                    winner[bank] = 2'(candidate);
+            end
             assert(issue[bank] == (!rst && ready[bank] && |eligible));
             if (issue[bank]) begin
                 issued_owner = int'(owner[bank*2 +: 2]);
+                if (arbitrary_initialized)
+                    assert(issued_owner == int'(winner[bank]));
                 assert(eligible[issued_owner]);
                 assert(row[bank*6 +: 6] == lines[issued_owner*8+2 +: 6]);
                 assert(!expected_grant[issued_owner]);
                 expected_grant[issued_owner] = 1;
+            end else begin
+                assert(owner[bank*2 +: 2] == 0);
+                assert(row[bank*6 +: 6] == 0);
             end
         end
         assert(grant == expected_grant);
+    end
+
+    always @(posedge clk) begin
+        if (rst)
+            arbitrary_initialized <= 1;
+        for (update = 0; update < 4; update = update + 1) begin
+            if (rst)
+                next_expected[update] <= 0;
+            else if (issue[update])
+                next_expected[update] <= winner[update] + 1'b1;
+        end
     end
 
     wire [3:0] conflict_grant, conflict_issue;
