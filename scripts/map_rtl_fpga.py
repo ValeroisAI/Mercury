@@ -23,6 +23,7 @@ _BLOCKS = {
     "mercury_fp8_product": (),
     "mercury_fp32_add_rne": (),
     "mercury_fp32_add_pipe": (),
+    "mercury_fp32_fma_pipe": (),
     "mercury_stme_interleaved_sum": ("mercury_fp8_product", "mercury_fp32_add_pipe"),
     "mercury_stme_boundary_accumulator": ("mercury_fp32_fma_rne",),
     "mercury_stme_fp8_dot": _DOT_DEPENDENCIES,

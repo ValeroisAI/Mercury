@@ -20,6 +20,7 @@ builds, some of which share RTL. LUT counts sum the reported LUT primitives.
 | `mercury_fp8_product` | 102 | 0 | 0 |
 | `mercury_fp32_add_rne` | 572 | 0 | 0 |
 | `mercury_fp32_add_pipe` | 569 | 186 | 0 |
+| `mercury_fp32_fma_pipe` | 1,727 | 528 | 2 |
 | `mercury_stme_interleaved_sum` | 912 | 776 | 0 |
 | `mercury_stme_boundary_accumulator` | 1,696 | 65 | 2 |
 | `mercury_stme_fp8_dot` | 2,297 | 172 | 2 |

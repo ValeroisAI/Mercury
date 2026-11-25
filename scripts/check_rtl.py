@@ -18,6 +18,7 @@ CHECKS = (
     "check_stme_rtl.py",
     "check_stme_interleaved_rtl.py",
     "check_fma_rtl.py",
+    "check_fp32_fma_pipe_rtl.py",
     "check_stme_fp8_dot_rtl.py",
     "check_stme_fp8_dot_reset_rtl.py",
 )
@@ -28,7 +29,7 @@ def main() -> int:
     parser.add_argument("--yosys", default=shutil.which("yosys") or shutil.which("yowasp-yosys"))
     parser.add_argument(
         "--exhaustive", action="store_true",
-        help="Check every FP8 product and the full 128-term boundary. Use 16,384 seeded FMA samples.",
+        help="Check every FP8 product and the full 128-term boundary. Use 16,384 seeded samples per FMA datapath.",
     )
     parser.add_argument("--fpga", action="store_true", help="Also map the prototype blocks onto UltraScale+.")
     args = parser.parse_args()
@@ -39,6 +40,7 @@ def main() -> int:
     coverage = {
         "check_stme_rtl.py": ("--exhaustive", "--full-group"),
         "check_fma_rtl.py": ("--random", "16384"),
+        "check_fp32_fma_pipe_rtl.py": ("--random", "16384"),
     }
     checks = (*CHECKS, "map_rtl_fpga.py") if args.fpga else CHECKS
     for check in checks:

@@ -71,6 +71,36 @@ def _vectors(count: int, seed: int) -> list[tuple[int, int, int]]:
     return cases
 
 
+def check_vectors(
+    command: list[str], env: dict[str, str], read: str, count: int, seed: int,
+) -> int:
+    """Compare Yosys evaluations of a binary32 FMA datapath to the exact reference."""
+    build = ROOT / "build"
+    build.mkdir(exist_ok=True)
+    codes = _vectors(count, seed)
+    with tempfile.TemporaryDirectory(prefix="fma-rtl-", dir=build) as folder:
+        script = Path(folder) / "vectors.ys"
+        commands = [read, "check -assert"]
+        commands.extend(
+            f"eval -set a 32'h{a:08x} -set b 32'h{b:08x} -set c 32'h{c:08x} -show y" for a, b, c in codes
+        )
+        script.write_text("\n".join(commands) + "\n", encoding="ascii")
+        run = subprocess.run(
+            [*command, "-s", script.relative_to(ROOT).as_posix()],
+            cwd=ROOT, env=env, check=True, stdout=subprocess.PIPE, text=True,
+        )
+    values = [int(bits, 2) if bits else int(decimal) for bits, decimal in _EVAL_RESULT.findall(run.stdout)]
+    if len(values) != len(codes):
+        raise AssertionError(f"Expected {len(codes)} binary32 outputs, got {len(values)}")
+    for (a, b, c), actual in zip(codes, values, strict=True):
+        expected = _bits(_fma_f32(_float(a), _float(b), _float(c)))
+        if actual != expected:
+            raise AssertionError(
+                f"FMA a={a:#010x} b={b:#010x} c={c:#010x}: RTL={actual:#010x} Python={expected:#010x}"
+            )
+    return len(codes)
+
+
 def main() -> int:
     """Run Yosys elaboration and compare directed and seeded FMA results bitwise."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -83,33 +113,12 @@ def main() -> int:
         parser.error("Install Yosys or pass its path with --yosys")
     if options.random < 0:
         parser.error("--random must be nonnegative")
+    command = [str(Path(path).resolve()), "-Q", "-T"]
     env = {**os.environ, "YOWASP_CACHE_DIR": str(ROOT / "build" / "rtl-cache")}
-    build = ROOT / "build"
-    build.mkdir(exist_ok=True)
-    codes = _vectors(options.random, options.seed)
-    with tempfile.TemporaryDirectory(prefix="fma-rtl-", dir=build) as folder:
-        script = Path(folder) / "vectors.ys"
-        commands = [_READ, "check -assert"]
-        commands.extend(
-            f"eval -set a 32'h{a:08x} -set b 32'h{b:08x} -set c 32'h{c:08x} -show y" for a, b, c in codes
-        )
-        script.write_text("\n".join(commands) + "\n", encoding="ascii")
-        run = subprocess.run(
-            [str(Path(path).resolve()), "-Q", "-T", "-s", script.relative_to(ROOT).as_posix()],
-            cwd=ROOT, env=env, check=True, stdout=subprocess.PIPE, text=True,
-        )
-    values = [int(bits, 2) if bits else int(decimal) for bits, decimal in _EVAL_RESULT.findall(run.stdout)]
-    if len(values) != len(codes):
-        raise AssertionError(f"Expected {len(codes)} binary32 outputs, got {len(values)}")
-    for (a, b, c), actual in zip(codes, values, strict=True):
-        expected = _bits(_fma_f32(_float(a), _float(b), _float(c)))
-        if actual != expected:
-            raise AssertionError(
-                f"FMA a={a:#010x} b={b:#010x} c={c:#010x}: RTL={actual:#010x} Python={expected:#010x}"
-            )
-    print(f"FMA RTL matched the exact Python reference for {len(codes):,} vectors.")
+    count = check_vectors(command, env, _READ, options.random, options.seed)
+    print(f"FMA RTL matched the exact Python reference for {count:,} vectors.", flush=True)
     return subprocess.run(
-        [str(Path(path).resolve()), "-Q", "-T", "-p", _BOUNDARY_CHECK],
+        [*command, "-p", _BOUNDARY_CHECK],
         cwd=ROOT, env=env, check=False,
     ).returncode
 

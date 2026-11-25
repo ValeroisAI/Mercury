@@ -24,4 +24,31 @@ Yosys 0.71 `synth -noabc; ltp -noff; stat` reported the following for the standa
 
 The baseline critical path passed through the product and result priority chains. The balanced searches replace those chains with hierarchical selection. Narrow exponent arithmetic reduces alignment and rounding-control logic. The width change passed Yosys equivalence against the preceding wide implementation.
 
-Generic cells and topological levels do not determine GHz, area, or power on a process node. The combinational FMA, scale-product generation, and connection to the tiled pipeline have no physical timing sign-off.
+## Six-stage FMA prototype
+
+The [registered FMA](../../rtl/mercury_fp32_fma_pipe.sv) accepts one triple
+each cycle. An input sampled at edge N is visible after edge N+5. Reset
+clears all valid stages. The consumer needs an available output slot each
+cycle.
+
+```sh
+python scripts/check_fp32_fma_pipe_rtl.py --random 16384
+```
+
+The checker separately evaluates the arithmetic stages with the registers
+replaced by wires and checks the real registered sequence. The arithmetic
+matched the exact Python oracle on **30,632 vectors**. The 29-step directed
+sequence checks consecutive triples, an input bubble, reset flushing, and
+output parity against delayed scalar FMA results.
+
+With the same Yosys command as above, the longest path fell from **233 to
+64 levels** on the first six-stage cut. Moving rounding-bit selection
+into the final stage reduced it to **55 levels**, with the same external
+latency. The final pipeline mapped to 9,003 generic cells including 695
+flip-flops. The longest stage normalizes the product and addend and selects
+the larger magnitude. [FPGA primitive mapping](./fpga-mapping.md) counts
+1,727 LUT primitives, 528 flip-flops and two DSP blocks for this top.
+
+The scalar dot uses the combinational FMA. Routing the registered FMA
+through the tiled pipeline, buffering its outputs, and measuring physical
+delay remain integration gates.
