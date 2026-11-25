@@ -1,5 +1,6 @@
 module stme_fp8_dot_tb #(
-    parameter integer TERMS = 4  // At least two terms in the fused-cancellation group.
+    parameter integer TERMS = 4,  // At least two terms in the fused-cancellation group.
+    parameter RAW_SCALES = 0
 ) (
     input wire clk,
     input wire rst
@@ -23,13 +24,27 @@ module stme_fp8_dot_tb #(
     wire [31:0] scale = phase == 0 || phase == THIRD ? 32'h3f800000 :
                         phase == SECOND ? 32'h3f7ffffe : 32'h7fc00000;
 
-    mercury_stme_fp8_dot #(.GROUP_TERMS(TERMS)) dut (
-        .clk(clk), .rst(rst),
-        .group_valid(send_descriptor), .group_ready(group_live), .group_first(phase != SECOND),
-        .group_last(phase != 0), .scale_product(scale), .in_valid(send_term), .in_ready(in_ready),
-        .a(a), .b(b), .a_e5m2(special_product), .b_e5m2(special_product),
-        .out_valid(out_valid), .out_ready(phase == DRAIN || phase == DRAIN+1), .out_acc(out_acc)
-    );
+    if (RAW_SCALES) begin: with_scale_rounding
+        // (1 - 2^-24)^2 rounds once to 1 - 2^-23. The product is not exact.
+        wire [31:0] scale_a = phase == SECOND ? 32'h3f7fffff :
+                             send_descriptor ? 32'h40000000 : 32'h7fc00000;
+        wire [31:0] scale_b = phase == SECOND ? 32'h3f7fffff : 32'h3f000000;
+        mercury_stme_scaled_fp8_dot #(.GROUP_TERMS(TERMS)) dut (
+            .clk(clk), .rst(rst),
+            .group_valid(send_descriptor), .group_ready(group_live), .group_first(phase != SECOND),
+            .group_last(phase != 0), .scale_a(scale_a), .scale_b(scale_b), .in_valid(send_term),
+            .in_ready(in_ready), .a(a), .b(b), .a_e5m2(special_product), .b_e5m2(special_product),
+            .out_valid(out_valid), .out_ready(phase == DRAIN || phase == DRAIN+1), .out_acc(out_acc)
+        );
+    end else begin: with_rounded_scale
+        mercury_stme_fp8_dot #(.GROUP_TERMS(TERMS)) dut (
+            .clk(clk), .rst(rst),
+            .group_valid(send_descriptor), .group_ready(group_live), .group_first(phase != SECOND),
+            .group_last(phase != 0), .scale_product(scale), .in_valid(send_term), .in_ready(in_ready),
+            .a(a), .b(b), .a_e5m2(special_product), .b_e5m2(special_product),
+            .out_valid(out_valid), .out_ready(phase == DRAIN || phase == DRAIN+1), .out_acc(out_acc)
+        );
+    end
 
     always @(posedge clk) begin
         if (rst) begin

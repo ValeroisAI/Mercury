@@ -23,6 +23,7 @@ builds, some of which share RTL. LUT counts sum the reported LUT primitives.
 | `mercury_stme_interleaved_sum` | 912 | 776 | 0 |
 | `mercury_stme_boundary_accumulator` | 1,696 | 65 | 2 |
 | `mercury_stme_fp8_dot` | 2,297 | 172 | 2 |
+| `mercury_stme_scaled_fp8_dot` | 3,095 | 172 | 4 |
 | `mercury_dma_tokens` | 63 | 20 | 0 |
 | `mercury_sram_arbiter` | 7,567 | 192 | 0 |
 
@@ -30,5 +31,6 @@ The original arbiter's default configuration hit the YoWASP call-stack
 limit during FPGA mapping. The [parallel selector](./shared-sram-rtl.md)
 completed on the same mapper. These counts describe the UltraScale+ family
 mapping, independent of device choice, speed grade, placement, route,
-timing, and power. The scalar FP8 dot still needs scale-product generation,
-and the arbiter needs the SRAM macros and payload path.
+timing, and power. The separate-scale scalar dot adds a binary32 rounded
+product before the fused accumulation. The arbiter needs the SRAM macros
+and payload path.

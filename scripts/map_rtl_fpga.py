@@ -12,19 +12,21 @@ import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
+_DOT_DEPENDENCIES = (
+    "mercury_fp8_product",
+    "mercury_fp32_add_rne",
+    "mercury_fp32_fma_rne",
+    "mercury_stme_group_sum",
+    "mercury_stme_boundary_accumulator",
+)
 _BLOCKS = {
     "mercury_fp8_product": (),
     "mercury_fp32_add_rne": (),
     "mercury_fp32_add_pipe": (),
     "mercury_stme_interleaved_sum": ("mercury_fp8_product", "mercury_fp32_add_pipe"),
     "mercury_stme_boundary_accumulator": ("mercury_fp32_fma_rne",),
-    "mercury_stme_fp8_dot": (
-        "mercury_fp8_product",
-        "mercury_fp32_add_rne",
-        "mercury_fp32_fma_rne",
-        "mercury_stme_group_sum",
-        "mercury_stme_boundary_accumulator",
-    ),
+    "mercury_stme_fp8_dot": _DOT_DEPENDENCIES,
+    "mercury_stme_scaled_fp8_dot": (*_DOT_DEPENDENCIES, "mercury_stme_fp8_dot"),
     "mercury_dma_tokens": (),
     "mercury_sram_arbiter": (),
 }
