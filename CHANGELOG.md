@@ -4,6 +4,19 @@ All notable changes to the **Mercury** open-source RISC-V AI Training GPU projec
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- A leaf/spine FSDP sensitivity model for ring placement, port loss, and the memory cost of deferred synchronization or parameter resharding.
+- Multi-seed, multi-distribution CPU validation of FP8 training with a shared quantizer and an exact-accumulation control.
+- A SystemVerilog Shared Tensor SRAM bank mapper and round-robin arbiter, with generic elaboration and bounded formal checks.
+- A SystemVerilog DMA token scoreboard with a generation-tagged issue, completion, and wait protocol.
+
+### Changed
+
+- Reorganized the README around reproducible evidence, physical constraints, and the pre-silicon scope.
+
 ## [0.4.0] - 2026-11-25
 
 ### Added
