@@ -12,6 +12,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 CHECKS = (
     "check_sram_rtl.py",
+    "check_sram_payload_directed_rtl.py",
     "check_dma_rtl.py",
     "check_fp32_rtl.py",
     "check_fp32_pipe_rtl.py",
