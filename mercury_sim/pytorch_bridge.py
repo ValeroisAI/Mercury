@@ -474,3 +474,334 @@ def run_pytorch_bridge_benchmark(
     report = deepcopy(_bridge(hidden, ffn, n_heads, batch, seq, n_slice, float(outlier_magnitude), seed))
     report["training_convergence"] = simulate_fp8_training_loop(20)
     return report
+
+
+# --------------------------------------------------------------------------
+# Multi-seed, multi-distribution FP8 training validation
+# --------------------------------------------------------------------------
+
+TRAINING_DISTRIBUTIONS = ("gaussian", "lognormal_outlier_24", "student_t3", "outlier_100")
+VALIDATION_PATHS = ("fp64_golden",) + FP8_GEMM_MODES
+_MODE_OF_PATH = {"fp64_golden": "fp64", **{m: m for m in FP8_GEMM_MODES}}
+_TRAINING_ERRORS = (RuntimeError, ValueError, FloatingPointError, OverflowError)
+_TARGET_SEED_OFFSET = 10_007
+# torch.manual_seed accepts at most 2**64 - 1; the target generator uses seed + offset.
+MAX_VALIDATION_SEED = 2**64 - 1 - _TARGET_SEED_OFFSET
+
+
+def seeded_activations(distribution: str, batch: int, seq: int, hidden: int, seed: int) -> torch.Tensor:
+    """Reproducible FP64 activations [batch, seq, hidden] from a named distribution.
+
+    * ``gaussian``: i.i.d. N(0, 1), so no outliers (a control for the outlier cases).
+    * ``lognormal_outlier_24``: per-channel signs and lognormal magnitudes,
+      plus one magnitude-24 channel per 32 channels (correlated outliers).
+    * ``student_t3``: i.i.d. Student-t with 3 degrees of freedom (heavy tails,
+      outliers scattered rather than per channel).
+    * ``outlier_100``: like ``lognormal_outlier_24`` but at magnitude 100.
+    """
+    if distribution == "lognormal_outlier_24":
+        return correlated_outlier_activations(batch, seq, hidden, outlier_magnitude=24.0, seed=seed)
+    if distribution == "outlier_100":
+        return correlated_outlier_activations(batch, seq, hidden, outlier_magnitude=100.0, seed=seed)
+    gen = torch.Generator().manual_seed(seed)
+    shape = (batch, seq, hidden)
+    if distribution == "gaussian":
+        return torch.randn(shape, generator=gen, dtype=torch.float64)
+    if distribution == "student_t3":
+        z = torch.randn(shape, generator=gen, dtype=torch.float64)
+        chi2 = torch.randn((3, *shape), generator=gen, dtype=torch.float64).pow(2).sum(0)
+        return z / torch.sqrt(chi2 / 3.0)
+    raise ValueError(f"Unknown distribution {distribution!r}; choose from {TRAINING_DISTRIBUTIONS}")
+
+
+def _train_one_path(mode: str, init: dict[str, torch.Tensor], x: torch.Tensor, target: torch.Tensor,
+                    steps: int, hidden: int, ffn: int, n_heads: int, lr: float) -> dict[str, Any]:
+    with torch.random.fork_rng():  # construction draws init RNG; weights are reloaded below
+        model = MercuryTransformerBlock(hidden, n_heads, ffn).double()
+    model.load_state_dict(init)
+    model.gemm_mode = mode
+    opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.01)
+    losses: list[float] = []
+    grad0 = None
+    try:
+        for step in range(steps):
+            opt.zero_grad(set_to_none=True)
+            loss = F.mse_loss(model(x), target)
+            value = float(loss.detach())
+            if not math.isfinite(value):
+                return {"status": "non_finite_loss", "losses": losses, "step": step}
+            loss.backward()
+            grads = torch.cat([p.grad.flatten() for p in model.parameters()])
+            if not bool(torch.isfinite(grads).all()):
+                return {"status": "non_finite_grad", "losses": losses, "step": step}
+            if step == 0:
+                grad0 = grads.clone()
+            opt.step()
+            losses.append(value)
+    except _TRAINING_ERRORS as exc:  # report, never hide, a failing numeric path
+        return {"status": f"error: {type(exc).__name__}: {exc}", "losses": losses, "step": len(losses)}
+    weights = _flat_params(model)
+    if not bool(torch.isfinite(weights).all()):
+        return {"status": "non_finite_weights", "losses": losses, "step": steps}
+    return {"status": "ok", "losses": losses, "grad0": grad0, "weights": weights}
+
+
+def _rel(u: torch.Tensor, v: torch.Tensor, denom: torch.Tensor | None = None) -> float:
+    d = float((v if denom is None else denom).norm())
+    return float((u - v).norm()) / d if d else float((u - v).norm())
+
+
+@lru_cache(maxsize=64)
+def _validation_run(seed: int, distribution: str, steps: int, hidden: int, ffn: int, n_heads: int,
+                    batch: int, seq: int, lr: float) -> dict[str, Any]:
+    with torch.random.fork_rng():  # do not disturb the caller's global RNG
+        torch.manual_seed(seed)
+        init = MercuryTransformerBlock(hidden, n_heads, ffn).double().state_dict()
+    w0 = torch.cat([t.flatten() for t in init.values()])
+    x = seeded_activations(distribution, batch, seq, hidden, seed)
+    target = torch.randn(x.shape, generator=torch.Generator().manual_seed(seed + _TARGET_SEED_OFFSET), dtype=torch.float64)
+    raw = {path: _train_one_path(_MODE_OF_PATH[path], init, x, target, steps, hidden, ffn, n_heads, lr)
+           for path in VALIDATION_PATHS}
+    gold, quant = raw["fp64_golden"], raw["fp8_quant_fp64_accum"]
+    paths: dict[str, Any] = {}
+    for path, r in raw.items():
+        entry: dict[str, Any] = {"status": r["status"], "loss_curve": r["losses"]}
+        if r["status"] == "ok":
+            curve = r["losses"]
+            entry.update({"final_loss": curve[-1],
+                          "loss_reduction": 1.0 - curve[-1] / curve[0] if curve[0] else None})
+            if gold["status"] == "ok":
+                update = gold["weights"] - w0
+                entry["update_drift_vs_fp64"] = _rel(r["weights"], gold["weights"], update)
+                entry["first_step_grad_err_vs_fp64"] = _rel(r["grad0"], gold["grad0"])
+            if quant["status"] == "ok" and path != "fp64_golden":
+                entry["update_drift_vs_fp8_exact_accum"] = _rel(r["weights"], quant["weights"],
+                                                                quant["weights"] - w0)
+                entry["first_step_grad_err_vs_fp8_exact_accum"] = _rel(r["grad0"], quant["grad0"])
+        else:
+            entry["failed_at_step"] = r["step"]
+        paths[path] = entry
+    return {"seed": seed, "distribution": distribution,
+            "max_abs_activation": float(x.abs().max()), "paths": paths}
+
+
+def _reduces_loss(entry: dict[str, Any]) -> bool:
+    reduction = entry.get("loss_reduction")
+    return reduction is not None and reduction > 0
+
+
+def _stats(values: list[float]) -> dict[str, float]:
+    return {"mean": math.fsum(values) / len(values), "min": min(values), "max": max(values), "n": len(values)}
+
+
+def run_training_validation(
+    seeds: tuple[int, ...] = (0, 1, 2),
+    distributions: tuple[str, ...] = TRAINING_DISTRIBUTIONS,
+    steps: int = 8,
+    *, hidden: int = 256, ffn: int = 512, n_heads: int = 4, batch: int = 2, seq: int = 8,
+    lr: float = 3e-3,
+) -> dict[str, Any]:
+    """Multi-seed FP8 training sensitivity: FP64 vs FP8-exact-accum vs Mercury vs Hopper.
+
+    Within one (seed, distribution) run, every path gets the same initial
+    weights, data, target, optimizer and step count. All FP8 paths use one
+    quantizer (``_fp8_operands``). They see identical FP8 bytes only where
+    their GEMM operands are identical: the step-0 forward GEMMs that read
+    the shared input and initial weights. After the first FP8 GEMM, the
+    intermediate activations, gradients and, later, the weights differ per
+    path, so each path re-quantizes slightly different tensors. The
+    ``*_vs_fp8_exact_accum`` metrics therefore measure accumulator-path
+    sensitivity, which FP8 re-quantization can amplify. They are not a
+    bit-paired accumulator-only measurement; the bit-paired one is
+    ``compare_gemm_paths``.
+
+    Inputs are validated. The caller's global torch RNG state is preserved.
+    The result is strict JSON: ``json.dumps(..., allow_nan=False)`` succeeds,
+    and any non-finite metric becomes ``None``.
+    """
+    seeds = tuple(seeds)
+    distributions = tuple(distributions)
+    if not seeds or not distributions:
+        raise ValueError("need at least one seed and one distribution")
+    if any(type(s) is not int or not 0 <= s <= MAX_VALIDATION_SEED for s in seeds) or len(set(seeds)) != len(seeds):
+        raise ValueError(f"seeds must be distinct integers in [0, {MAX_VALIDATION_SEED}]")
+    if type(steps) is not int or steps < 2:
+        raise ValueError("steps must be an integer >= 2")
+    for d in distributions:
+        if d not in TRAINING_DISTRIBUTIONS:
+            raise ValueError(f"Unknown distribution {d!r}; choose from {TRAINING_DISTRIBUTIONS}")
+    if len(set(distributions)) != len(distributions):
+        raise ValueError("distributions must be distinct")
+    dims = {"hidden": hidden, "ffn": ffn, "n_heads": n_heads, "batch": batch, "seq": seq}
+    for name, value in dims.items():
+        if type(value) is not int or value <= 0:
+            raise ValueError(f"{name} must be a positive integer")
+    if hidden % n_heads:
+        raise ValueError("hidden must be divisible by n_heads")
+    if isinstance(lr, bool) or not isinstance(lr, (int, float)) or not math.isfinite(lr) or not 0 < lr <= 1:
+        raise ValueError("lr must be a finite number in (0, 1]")
+    cfg = (steps, hidden, ffn, n_heads, batch, seq, float(lr))
+    with torch.random.fork_rng():
+        return _json_strict(_training_validation(seeds, distributions, cfg))
+
+
+def _json_strict(obj: Any) -> Any:
+    """Recursively replace non-finite floats with None so allow_nan=False always works."""
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, dict):
+        return {k: _json_strict(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_strict(v) for v in obj]
+    return obj
+
+
+def _training_validation(seeds: tuple[int, ...], distributions: tuple[str, ...],
+                         cfg: tuple) -> dict[str, Any]:
+    steps, hidden, ffn, n_heads, batch, seq, lr = cfg
+    runs = [deepcopy(_validation_run(s, d, *cfg)) for d in distributions for s in seeds]
+
+    metrics = ("final_loss", "loss_reduction", "update_drift_vs_fp64", "first_step_grad_err_vs_fp64",
+               "update_drift_vs_fp8_exact_accum", "first_step_grad_err_vs_fp8_exact_accum")
+    aggregate: dict[str, Any] = {}
+    for path in VALIDATION_PATHS:
+        ok = [r["paths"][path] for r in runs if r["paths"][path]["status"] == "ok"]
+        aggregate[path] = {"ok_runs": len(ok), "failed_runs": len(runs) - len(ok)}
+        for m in metrics:
+            vals = [p[m] for p in ok if p.get(m) is not None]  # skip undefined metrics
+            if vals:
+                aggregate[path][m] = _stats(vals)
+
+    def accum_ratio(r: dict[str, Any]) -> float | None:
+        h = r["paths"]["hopper_14bit"].get("first_step_grad_err_vs_fp8_exact_accum")
+        mm = r["paths"]["mercury_fp8_blk"].get("first_step_grad_err_vs_fp8_exact_accum")
+        return None if h is None or mm is None else h / max(mm, 1e-300)
+
+    per_distribution = {}
+    for d in distributions:
+        rs = [r for r in runs if r["distribution"] == d]
+        ratios = [x for x in map(accum_ratio, rs) if x is not None]
+        quant = [r["paths"]["fp8_quant_fp64_accum"].get("update_drift_vs_fp64") for r in rs]
+        per_distribution[d] = {
+            "hopper_over_mercury_accum_grad_err": _stats(ratios) if ratios else None,
+            "fp8_quantization_update_drift_vs_fp64": _stats([q for q in quant if q is not None]) if any(
+                q is not None for q in quant) else None,
+        }
+
+    # Controls: determinism of the FP64 reference, and exact-vs-fast Mercury partial order.
+    # Both report a status instead of raising, so failures stay visible in the JSON.
+    probe = runs[0]
+    rerun = _train_one_path("fp64", *_probe_inputs(probe["seed"], probe["distribution"], hidden, ffn,
+                                                   n_heads, batch, seq), steps, hidden, ffn, n_heads, lr)
+    first_gold = _validation_gold_weights(probe["seed"], probe["distribution"], *cfg)
+    if rerun["status"] != "ok" or first_gold is None:
+        rerun_equal, rerun_status = None, "reference failed: " + rerun["status"]
+    else:
+        rerun_equal, rerun_status = bool(torch.equal(rerun["weights"], first_gold)), "ok"
+    try:
+        a_probe = seeded_activations(probe["distribution"], batch, seq, hidden, probe["seed"]).reshape(-1, hidden)
+        with torch.random.fork_rng():
+            torch.manual_seed(probe["seed"])
+            w_probe = MercuryTransformerBlock(hidden, n_heads, ffn).double().gate_proj.weight.detach()
+        exact = mercury_fp8_gemm(a_probe, w_probe.T, exact_order=True)
+        fast = mercury_fp8_gemm(a_probe, w_probe.T, exact_order=False)
+        order_rel, order_status = _rel(fast, exact), "ok"
+    except _TRAINING_ERRORS as exc:
+        order_rel, order_status = None, f"error: {type(exc).__name__}: {exc}"
+    controls = {
+        "fp64_rerun_bitwise_equal": rerun_equal,
+        "fp64_rerun_status": rerun_status,
+        "same_quantizer_across_fp8_paths": True,  # one _fp8_operands implementation for all FP8 GEMMs
+        "identical_fp8_bytes_scope": ("only GEMMs with identical operands (step-0 forward GEMMs that read "
+                                      "the shared input and initial weights); later operands diverge per path"),
+        "mercury_fast_vs_exact_order_rel_l2": order_rel,
+        "mercury_order_probe_status": order_status,
+        "quantization_only_path": "fp8_quant_fp64_accum",
+        "accumulator_path_sensitivity_metric": (
+            "*_vs_fp8_exact_accum: each FP8 path vs fp8_quant_fp64_accum through the full block. "
+            "Includes FP8 re-quantization amplification; not bit-paired accumulator-only error "
+            "(see compare_gemm_paths for that)."),
+    }
+
+    ok_pairs = [r for r in runs if all(r["paths"][p]["status"] == "ok" for p in VALIDATION_PATHS)]
+    merc_acc = [r["paths"]["mercury_fp8_blk"]["first_step_grad_err_vs_fp8_exact_accum"] for r in ok_pairs]
+    hop_acc = [r["paths"]["hopper_14bit"]["first_step_grad_err_vs_fp8_exact_accum"] for r in ok_pairs]
+    quant_dom = [abs(r["paths"]["mercury_fp8_blk"]["update_drift_vs_fp64"]
+                     - r["paths"]["fp8_quant_fp64_accum"]["update_drift_vs_fp64"])
+                 < 0.1 * r["paths"]["fp8_quant_fp64_accum"]["update_drift_vs_fp64"] for r in ok_pairs]
+    e2e_merc_wins = [r["paths"]["mercury_fp8_blk"]["update_drift_vs_fp64"]
+                     < r["paths"]["hopper_14bit"]["update_drift_vs_fp64"] for r in ok_pairs]
+    traj_merc_wins = [r["paths"]["mercury_fp8_blk"]["update_drift_vs_fp8_exact_accum"]
+                      < r["paths"]["hopper_14bit"]["update_drift_vs_fp8_exact_accum"] for r in ok_pairs]
+    verdict = {
+        "runs": len(runs),
+        "all_paths_finite": all(r["paths"][p]["status"] == "ok" for r in runs for p in VALIDATION_PATHS),
+        # An undefined reduction (zero initial loss) counts as not converging, never as a crash.
+        "all_paths_reduce_loss": all(_reduces_loss(r["paths"][p]) for r in runs for p in VALIDATION_PATHS),
+        "undefined_loss_reduction_paths": sum(
+            r["paths"][p]["status"] == "ok" and r["paths"][p].get("loss_reduction") is None
+            for r in runs for p in VALIDATION_PATHS),
+        "mercury_accum_grad_err_max": max(merc_acc) if merc_acc else None,
+        "hopper_accum_grad_err_min": min(hop_acc) if hop_acc else None,
+        "mercury_accum_below_hopper_runs": sum(m < h for m, h in zip(merc_acc, hop_acc)),
+        "quantization_dominates_end_to_end_runs": sum(quant_dom),
+        "mercury_beats_hopper_end_to_end_runs": sum(e2e_merc_wins),
+        "mercury_closer_to_exact_accum_trajectory_runs": sum(traj_merc_wins),
+        "comparable_runs": len(ok_pairs),
+        "metric_semantics": ("mercury_accum_* / hopper_accum_* are accumulator-path sensitivities of "
+                             "the step-0 gradient vs fp8_quant_fp64_accum, not bit-paired "
+                             "accumulator-only errors."),
+        "note": ("A Mercury accumulator-path gradient error far above FP32 epsilon (seen at ~7e-4 for "
+                 "student_t3 seed 1 with the default config, concentrated in Q/K/V/attn_norm and "
+                 "unchanged with strict K order) is consistent with FP8 re-quantization flips: a ~1e-7 "
+                 "FP32 difference upstream moves a value across an E4M3 rounding midpoint in a "
+                 "downstream GEMM."),
+    }
+    return {
+        "config": {"seeds": list(seeds), "distributions": list(distributions), "steps": steps,
+                   "hidden": hidden, "ffn": ffn, "n_heads": n_heads, "batch": batch, "seq": seq,
+                   "optimizer": "torch.optim.AdamW", "lr": float(lr), "weight_decay": 0.01,
+                   "paths": list(VALIDATION_PATHS)},
+        "runs": runs,
+        "aggregate": aggregate,
+        "per_distribution": per_distribution,
+        "controls": controls,
+        "verdict": verdict,
+        "limitations": [
+            "Synthetic memorization task: one fixed batch of 16 tokens and a random target, "
+            "not language-model training. Short horizon (default 8 steps).",
+            "One pre-norm block (hidden 256, ffn 512). Only the 7 nn.Linear layers run FP8 "
+            "(forward Y, dX, dW). SDPA QK^T/PV, RMSNorm, SiLU and AdamW run in FP64.",
+            "The training path computes Mercury partials with FP32 BLAS order "
+            "(controls.mercury_fast_vs_exact_order_rel_l2). Strict-K-order bit-exactness vs "
+            "compute_isa is tested on sample GEMMs, not on every training GEMM.",
+            "The Hopper model is the DeepSeek-V3-reported 14-bit/32-product alignment approximation, "
+            "not measured H100 hardware.",
+            "AdamW normalizes update magnitudes and trajectories decorrelate over steps, so "
+            "end-to-end drift mixes accumulator error with chaotic divergence. The step-0 "
+            "gradient error vs fp8_quant_fp64_accum is the cleanest training-level accumulator "
+            "signal, but it still includes FP8 re-quantization amplification.",
+            "FP8 bytes are bit-identical across FP8 paths only for GEMMs with identical operands; "
+            "after the first FP8 GEMM each path re-quantizes its own (slightly different) tensors.",
+            "CPU-only emulation. It says nothing about speed or about convergence at scale.",
+        ],
+    }
+
+
+def _probe_inputs(seed: int, distribution: str, hidden: int, ffn: int, n_heads: int,
+                  batch: int, seq: int) -> tuple[dict[str, torch.Tensor], torch.Tensor, torch.Tensor]:
+    with torch.random.fork_rng():
+        torch.manual_seed(seed)
+        init = MercuryTransformerBlock(hidden, n_heads, ffn).double().state_dict()
+    x = seeded_activations(distribution, batch, seq, hidden, seed)
+    target = torch.randn(x.shape, generator=torch.Generator().manual_seed(seed + _TARGET_SEED_OFFSET), dtype=torch.float64)
+    return init, x, target
+
+
+@lru_cache(maxsize=16)
+def _validation_gold_weights(seed: int, distribution: str, steps: int, hidden: int, ffn: int,
+                             n_heads: int, batch: int, seq: int, lr: float) -> torch.Tensor | None:
+    """FP64 reference weights for the determinism control, or None if that run failed."""
+    init, x, target = _probe_inputs(seed, distribution, hidden, ffn, n_heads, batch, seq)
+    out = _train_one_path("fp64", init, x, target, steps, hidden, ffn, n_heads, lr)
+    return out["weights"] if out["status"] == "ok" else None
