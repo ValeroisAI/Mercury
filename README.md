@@ -1,10 +1,10 @@
 # Mercury-1
 
-Mercury-1 is an open-source RISC-V GPU design for AI training. This repository includes a runnable assembler, functional virtual machine, architectural models, and SystemVerilog prototypes.
+Mercury-1 is an open-source RISC-V GPU design for AI training, with runnable FP8 kernels, a functional virtual machine, and SystemVerilog prototypes.
 
 > **Pre-silicon design.** Throughput, cost, and power figures come from design targets, analytical models, and CPU simulations.
 
-[Quickstart](#quickstart) · [Architecture](./docs/architecture/mercury-1-spec.md) · [Benchmarks](#simulation-results) · [RTL evidence](#rtl-evidence)
+[Quickstart](#quickstart) · [Architecture](#architecture) · [Simulation results](#simulation-results) · [RTL evidence](#rtl-evidence) · [Silicon readiness](./docs/verification/silicon-readiness.md)
 
 ![Mercury-1D concept render showing two compute chiplets on an accelerator module](./assets/mercury-1-hero.jpg)
 
@@ -12,34 +12,42 @@ Mercury-1 is an open-source RISC-V GPU design for AI training. This repository i
 
 ## Quickstart
 
-From the repository root (Python 3.11+), run both assembled `Xmer*` kernels in `MercuryVM` first:
+From the repository root, run both `Xmer*` kernels in `MercuryVM` with Python 3.11 or later. This command uses the standard library.
 
-```bash
-python -c "
-import json
-from mercury_isa import (
-  run_isa_kernel_benchmarks as r,
-)
-print(json.dumps(r(), indent=2))
-"
+```sh
+python -c "import json; from mercury_isa import run_isa_kernel_benchmarks; print(json.dumps(run_isa_kernel_benchmarks(), indent=2))"
 ```
 
-This prints VM cycles and FP64 error for the divergent ReLU normalization and fused FP8 attention tile kernels ([assembly walkthrough](#example-fp8-attention-tile)).
+The JSON includes the VM's estimated cycle count and error against an FP64 reference.
 
-Run the full pytest suite, qualification report, charts, and local interactive workbench:
+| Kernel | Estimated VM cycles | Max absolute error vs. FP64 |
+| :--- | ---: | ---: |
+| Divergent ReLU normalization | 12 | 3.31e-9 |
+| Fused FP8 attention tile | 168 | 5.51e-6 |
 
-```bash
+[Walk through the FP8 attention tile](#example-fp8-attention-tile)
+
+### Open the Workbench
+
+Serve the checked-in qualification data, then open [the local Workbench](http://127.0.0.1:8765/dashboard/index.html).
+
+```sh
+python -m http.server 8765 --bind 127.0.0.1
+```
+
+Try **Thermal & Power → Mid-Run Fault @120s** to see how the modeled module responds to a cooling failure.
+
+### Reproduce the qualification results
+
+In a Python virtual environment, install the optional dependencies and run the suite. The generators write the [qualification report](./docs/verification/qualification-report.md), [benchmark charts](./assets/charts/), and Workbench data.
+
+```sh
 python -m pip install pytest numpy pillow torch
 python -m pytest -q
 python scripts/run_qualification.py
 python scripts/generate_charts.py
 python scripts/export_dashboard_data.py
-python -m http.server 8765 --bind 127.0.0.1
 ```
-
-Open [the qualification report](./docs/verification/qualification-report.md), inspect the charts in [`assets/charts/`](./assets/charts/), or browse `http://127.0.0.1:8765/dashboard/index.html` while the HTTP server is running.
-
-[FP8 training experiment](./docs/verification/fp8-training-validation.md) · [Silicon readiness gates](./docs/verification/silicon-readiness.md)
 
 ## Architecture
 
@@ -149,9 +157,10 @@ All charts below are generated directly from the Python simulators (`scripts/gen
 | :--- | :--- |
 | [FP8 multiplication and group sum](./docs/verification/stme-group-rtl.md) | 262,144 operand and format combinations against the Python reference, plus a bounded check of the full 128-term group |
 | [Pipelined FP32 group sum](./docs/verification/stme-interleaved-rtl.md) | Four-stage addition and 16 consecutive accepted inputs across eight independent contexts in a bounded handshake check |
-| [Pipelined FP32 FMA](./docs/verification/stme-boundary-rtl.md#six-stage-fma-prototype) | Six-stage prototype with directed latency checks and 30,632 arithmetic comparisons |
+| [Pipelined FP32 FMA](./docs/verification/stme-boundary-rtl.md#six-stage-fma-prototype) | Six stages, 30,632 arithmetic comparisons, and a reduction from 233 to 55 generic synthesis logic levels |
 | [Scaled scalar FP8 dot](./docs/verification/stme-fp8-dot-rtl.md) | Two binary32 scales round once before FMA. Bounded handshake and reset checks preserve group order and an exact fused residual of `-2^-46`. |
-| [SRAM bank arbiter](./docs/verification/shared-sram-rtl.md) and [DMA tokens](./docs/verification/dma-token-rtl.md) | XOR bank mapping, arbitration, and generation-tagged completion checks |
+| [64-bank SRAM arbiter](./docs/verification/shared-sram-rtl.md) | 2,056 formal equivalence points against the serial implementation and a reduction from 1,561 to 26 generic synthesis logic levels |
+| [DMA tokens](./docs/verification/dma-token-rtl.md) | Bounded checks for generation-tagged completion and acquisition |
 | [Banked SRAM payload](./docs/verification/sram-payload-rtl.md) | 64-bank structural check and directed tests of byte masks, response routing, stalls, and reset on a reduced configuration |
 
 With Yosys on PATH, run the [RTL regression](./scripts/check_rtl.py) from the repository root:
@@ -160,7 +169,7 @@ With Yosys on PATH, run the [RTL regression](./scripts/check_rtl.py) from the re
 python scripts/check_rtl.py
 ```
 
-Use `--exhaustive --fpga` for the full FP8 product sweep, the 128-term group check, and FPGA synthesis.
+Use `--exhaustive --fpga` for the full FP8 product sweep, the 128-term group check, and UltraScale+ primitive mapping for ten RTL tops. Generic logic depth and FPGA primitive counts are synthesis results. Physical timing is a separate [readiness gate](./docs/verification/silicon-readiness.md).
 
 [Yosys setup](./docs/verification/shared-sram-rtl.md) · [FP32 FMA checks](./docs/verification/stme-boundary-rtl.md) · [FPGA primitive counts](./docs/verification/fpga-mapping.md) · [Silicon readiness gates](./docs/verification/silicon-readiness.md)
 
