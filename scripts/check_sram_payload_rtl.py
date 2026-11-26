@@ -7,7 +7,8 @@ macro model only returns data for reads accepted earlier since the last reset.
 2. Each reachability probe (``-DPROBE_*``, run with ``sat -falsify``) must find a counterexample. That shows the
    scenario is reachable within the bound, so the main proof is not vacuous:
    two banks issuing in one cycle, a held response through a stall, a write
-   right after a consumed read, and a reset flush followed by a new read.
+   in the cycle of a consumed read, a bank refill during a reply, and a
+   reset flush followed by a new read.
 
 Run:  python scripts/check_sram_payload_rtl.py --yosys build/rtl-env/Scripts/yowasp-yosys.exe
 Expect a few minutes per SAT job.
@@ -23,7 +24,10 @@ import subprocess
 
 _ROOT = Path(__file__).resolve().parents[1]
 _SOURCES = "rtl/mercury_sram_arbiter.sv rtl/mercury_sram_payload.sv tests/rtl/sram_payload_tb.sv"
-_PROBES = ("PROBE_TWO_BANKS", "PROBE_HELD_STALL", "PROBE_WRITE_AFTER_READ", "PROBE_RESET_FLUSH")
+_PROBES = (
+    "PROBE_TWO_BANKS", "PROBE_HELD_STALL", "PROBE_WRITE_AFTER_READ", "PROBE_BANK_REFILL",
+    "PROBE_RESET_FLUSH",
+)
 
 
 def _job(define: str = "", seq: int = 6) -> str:

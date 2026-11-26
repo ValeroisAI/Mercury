@@ -9,13 +9,8 @@
 // per-requester "read outstanding", per-bank lock and owner, and captured
 // data, and checks the DUT every cycle after the first reset.
 //
-// Two contract points are left open on purpose and checked with bounds:
-//   * whether a requester may be granted in the cycle its response is
-//     consumed, and whether a bank may issue in the cycle its read data is
-//     captured. Both are allowed, never required;
-//   * whether a captured response is shown in the capture cycle
-//     (combinational) or from the next cycle (registered). Both are allowed.
-//     After that it must stay visible and stable until consumed.
+// A consumed response frees its requester, and a captured reply frees its
+// bank, for arbitration in the same cycle. Responses stay stable until consumed.
 //
 // `PROBE_* defines turn one assertion into a reachability probe. Each probe
 // must FAIL, which proves the scenario happens within the bound (no vacuity).
@@ -47,7 +42,7 @@ module sram_payload_tb (
     reg [31:0] pdata [0:3];
     reg [3:0] prev_stall;      // resp_valid && !resp_ready last cycle
     reg [31:0] prev_rdata [0:3];
-    reg prev_beat0 = 0, seen_flush = 0;   // reachability-probe bookkeeping
+    reg seen_flush = 0;
 
     wire [3:0] bank_read_valid = bank_read_valid_in & lock & {4{!rst}};
 
@@ -70,7 +65,7 @@ module sram_payload_tb (
 
     // ---------------- combinational reference ----------------
     reg [3:0] target_hit [0:3];   // [bank][requester]
-    reg [3:0] strict_ok, lenient_ok;  // requester may be granted (strict: not busy)
+    reg [3:0] eligible;
     reg [1:0] winner [0:3];
     reg [3:0] beat, capture_now;
     integer r, b;
@@ -79,8 +74,7 @@ module sram_payload_tb (
         beat = resp_valid & resp_ready;
         capture_now = bank_read_valid;
         for (r = 0; r < R; r = r + 1) begin
-            strict_ok[r]  = req_valid[r] && !busy[r];
-            lenient_ok[r] = req_valid[r] && (!busy[r] || beat[r]);
+            eligible[r] = req_valid[r] && (!busy[r] || beat[r]);
         end
         for (b = 0; b < B; b = b + 1) begin
             target_hit[b] = 0;
@@ -103,7 +97,7 @@ module sram_payload_tb (
             if (rst) assert(req_grant == 0 && bank_issue == 0 && resp_valid == 0);
             for (cr = 0; cr < R; cr = cr + 1) begin
                 // A grant needs a valid request from a requester without an unconsumed read.
-                if (req_grant[cr]) assert(lenient_ok[cr]);
+                if (req_grant[cr]) assert(eligible[cr]);
                 // A response belongs to an accepted read: captured earlier, or being captured now.
                 if (resp_valid[cr]) begin
                     assert(busy[cr]);
@@ -144,11 +138,12 @@ module sram_payload_tb (
                         assert(bank_wstrb[cb*4 +: 4] == req_wstrb[k*4 +: 4]);
                     end
                 end
-                // Work conserving: a ready, unlocked bank with a free, valid requester must issue.
+                // A releasing bank or requester is available at this edge.
                 n = 0;
                 for (cr = 0; cr < R; cr = cr + 1)
-                    if (strict_ok[cr] && target_hit[cb][cr]) n = n + 3'd1;
-                if (!rst && bank_ready[cb] && !lock[cb] && n != 3'd0) assert(bank_issue[cb]);
+                    if (eligible[cr] && target_hit[cb][cr]) n = n + 3'd1;
+                if (!rst && bank_ready[cb] && (!lock[cb] || capture_now[cb]) && n != 3'd0)
+                    assert(bank_issue[cb]);
             end
             // Every grant shows up as exactly one bank issue.
             n = 0;
@@ -163,8 +158,10 @@ module sram_payload_tb (
             assert(!(prev_stall[2]));
 `endif
 `ifdef PROBE_WRITE_AFTER_READ
-            // Requester 0 is granted a write the cycle after its read was consumed.
-            assert(!(req_grant[0] && req_write[0] && prev_beat0));
+            assert(!(req_grant[0] && req_write[0] && beat[0]));
+`endif
+`ifdef PROBE_BANK_REFILL
+            assert(!(capture_now[0] && bank_issue[0] && !bank_write[0]));
 `endif
 `ifdef PROBE_RESET_FLUSH
             // A reset arrives while a read is outstanding, then a new read completes.
@@ -175,7 +172,6 @@ module sram_payload_tb (
 
     integer j;
     always @(posedge clk) begin
-        prev_beat0 <= !rst && beat[0];
         if (rst) begin
             initialized <= 1;
             seen_flush <= initialized && (|lock || |busy);

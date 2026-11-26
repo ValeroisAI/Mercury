@@ -30,6 +30,7 @@ _BLOCKS = {
     "mercury_stme_scaled_fp8_dot": (*_DOT_DEPENDENCIES, "mercury_stme_fp8_dot"),
     "mercury_dma_tokens": (),
     "mercury_sram_arbiter": (),
+    "mercury_sram_bram": ("mercury_sram_arbiter", "mercury_sram_payload"),
 }
 
 

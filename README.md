@@ -161,7 +161,8 @@ All charts below are generated directly from the Python simulators (`scripts/gen
 | [Scaled scalar FP8 dot](./docs/verification/stme-fp8-dot-rtl.md) | Two binary32 scales round once before FMA. Bounded handshake and reset checks preserve group order and an exact fused residual of `-2^-46`. |
 | [64-bank SRAM arbiter](./docs/verification/shared-sram-rtl.md) | 2,056 formal equivalence points against the serial implementation and a reduction from 1,561 to 26 generic synthesis logic levels |
 | [DMA tokens](./docs/verification/dma-token-rtl.md) | Bounded checks for generation-tagged completion and acquisition |
-| [Banked SRAM payload](./docs/verification/sram-payload-rtl.md) | 64-bank structural check and directed tests of byte masks, response routing, stalls, and reset on a reduced configuration |
+| [Banked SRAM payload](./docs/verification/sram-payload-rtl.md) | Full-size simulation with eight saturated requesters and 512-bit lines, plus bounded checks for same-cycle turnover, byte masks, stalls, and reset |
+| [FPGA SRAM integration](./docs/verification/sram-bram-validation.md) | Four banks with 16 KiB total, read/write and reset simulation, and mapping to four UltraScale+ block RAM primitives |
 
 With Yosys on PATH, run the [RTL regression](./scripts/check_rtl.py) from the repository root:
 
@@ -169,7 +170,11 @@ With Yosys on PATH, run the [RTL regression](./scripts/check_rtl.py) from the re
 python scripts/check_rtl.py
 ```
 
-Use `--exhaustive --fpga` for the full FP8 product sweep, the 128-term group check, and UltraScale+ primitive mapping for ten RTL tops. Generic logic depth and FPGA primitive counts are synthesis results. Physical timing is a separate [readiness gate](./docs/verification/silicon-readiness.md).
+Use `--exhaustive --fpga` for the full FP8 product sweep, the 128-term group check, and UltraScale+ primitive mapping for eleven RTL tops. Generic logic depth and FPGA primitive counts are synthesis results. Physical timing is a separate [readiness gate](./docs/verification/silicon-readiness.md).
+
+Add `--simulation` with Icarus Verilog on `PATH` to run the [full-load SRAM simulation](./docs/verification/sram-payload-rtl.md#full-load-simulation). Eight continuously active requesters targeting one ready bank sustained **one read per cycle**, with **at most seven ungranted cycles** per requester between grants. A bank ready every fourth cycle sustained **0.25 reads per cycle** with up to **31 ungranted cycles**. Both cases used a one-cycle macro model.
+
+![Mercury SRAM full-load RTL results. Four reads per cycle across four or eight banks, two across two banks, and one across a single ready bank.](./assets/charts/sram-full-load.png)
 
 [Yosys setup](./docs/verification/shared-sram-rtl.md) · [FP32 FMA checks](./docs/verification/stme-boundary-rtl.md) · [FPGA primitive counts](./docs/verification/fpga-mapping.md) · [Silicon readiness gates](./docs/verification/silicon-readiness.md)
 

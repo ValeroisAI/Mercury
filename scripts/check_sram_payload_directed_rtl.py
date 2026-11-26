@@ -20,23 +20,27 @@ _STEPS = {
     1: {"rst": 1},
     # Parallel bank 0 and bank 2 reads, and a masked bank 1 write.
     2: {"req_valid": 0x7, "req_write": 0x2, "req_line": 0x00000408},
-    # The first macro returns. Requester 0 is still busy.
-    3: {"req_valid": 0x1, "req_write": 0x1, "req_line": 0x00000004, "bank_ready": 0xD,
+    # The first macro returns and immediately takes another read from requester 3.
+    3: {"req_valid": 0x9, "req_write": 0x1, "req_line": 0x24000004, "bank_ready": 0xD,
         "bank_read_valid_in": 0x1},
-    # The second reply arrives as another requester reuses bank 0.
-    4: {"req_valid": 0x9, "req_write": 0x9, "req_line": 0x24000004, "bank_read_valid_in": 0x4,
+    # Bank 0 remains busy until step 6. Bank 2 returns independently.
+    4: {"req_valid": 0x1, "req_write": 0x1, "req_line": 0x00000004, "bank_read_valid_in": 0x4,
         "bank_rdata": 0xCAFEFEED_FFFFFFFF_00000000_FEDCBA98},
     5: {"resp_ready": 0x4, "req_valid": 0x1, "req_write": 0x1, "req_line": 0x00000004},
-    6: {"resp_ready": 0x1, "req_valid": 0x5, "req_write": 0x5, "req_line": 0x00240004},
-    # After requester 0 consumes its reply, its write can proceed.
-    7: {"req_valid": 0x9, "req_write": 0x1, "req_line": 0x0C000004},
-    # Reset with requester 3's read in flight, then submit a new read.
+    # Bank 0 returns as requester 0 consumes its response and issues its write.
+    6: {"resp_ready": 0x1, "req_valid": 0x5, "req_write": 0x5, "req_line": 0x00240004,
+        "bank_read_valid_in": 0x1},
+    7: {"req_valid": 0x6, "req_write": 0x4, "req_line": 0x00240C00},
+    # Reset with requester 1's read in flight, then submit a new read.
     8: {"rst": 1},
     9: {"req_valid": 0x2, "req_line": 0x00000800},
     10: {"bank_read_valid_in": 0x4},
     11: {"resp_ready": 0x2},
 }
-_PROBES = ("PROBE_TWO_BANKS", "PROBE_HELD_STALL", "PROBE_WRITE_AFTER_READ", "PROBE_RESET_FLUSH")
+_PROBES = (
+    "PROBE_TWO_BANKS", "PROBE_HELD_STALL", "PROBE_WRITE_AFTER_READ", "PROBE_BANK_REFILL",
+    "PROBE_RESET_FLUSH",
+)
 
 
 def _literal(name: str, value: int) -> str:

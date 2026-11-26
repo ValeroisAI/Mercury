@@ -33,6 +33,7 @@ def main() -> int:
         help="Check every FP8 product and the full 128-term boundary. Use 16,384 seeded samples per FMA datapath.",
     )
     parser.add_argument("--fpga", action="store_true", help="Also map the prototype blocks onto UltraScale+.")
+    parser.add_argument("--simulation", action="store_true", help="Also simulate full SRAM load and the FPGA BRAM integration with Icarus Verilog.")
     args = parser.parse_args()
     executable = shutil.which(args.yosys) if args.yosys else None
     if executable is None:
@@ -53,7 +54,12 @@ def main() -> int:
         ).returncode
         if code:
             return code
-    print(f"\nAll {len(checks)} RTL commands passed.", flush=True)
+    if args.simulation:
+        code = subprocess.run([sys.executable, str(ROOT / "scripts" / "check_sram_full_load.py")],
+                              cwd=ROOT, check=False).returncode
+        if code:
+            return code
+    print(f"\nAll {len(checks) + int(args.simulation)} RTL commands passed.", flush=True)
     return 0
 
 
