@@ -45,3 +45,30 @@ board top. Vivado placement and routing have yet to be run for this block.
 | FPGA board | Board top with clocks, reset, package pins and I/O standards, host stimulus or on-chip BIST, physical board | Read back masked writes, exercise one-bank contention and distributed load, verify reset while reads are live, record throughput and failures |
 | N4P timing and macro integration | Target PDK and characterized SRAM macro timing and physical views, macro latency and mask contract, routed top with extracted parasitics | Setup and hold across required corners at the 1.85 GHz target, along with macro integration and physical verification reports |
 | Mercury board | Fabricated board, measurement equipment and board qualification fixture | Bring-up, memory-link signal integrity, power integrity and sustained thermal load results |
+
+## FPGA board self-test
+
+Use [`mercury_sram_board_test`](../../rtl/mercury_sram_board_test.sv) as the
+test top or instantiate it in a board-specific top. Drive a synchronous reset
+for at least one rising clock edge before the test. The test owns the BRAM it
+instantiates. It writes a distinct pattern to all 2,048 lines, applies a byte
+mask, compares the readback with response backpressure, and then makes four
+requesters read one bank at a time. `done` latches on completion, mismatch,
+unexpected response, or timeout. `pass` latches only on successful completion.
+
+Run this simulation from the repository root with Icarus Verilog on `PATH`:
+
+```sh
+mkdir -p build
+iverilog -g2012 -s sram_board_test_tb -o build/sram-board-test.vvp rtl/mercury_sram_arbiter.sv rtl/mercury_sram_payload.sv rtl/mercury_sram_bram.sv rtl/mercury_sram_board_test.sv tests/rtl/sram_board_test_tb.sv
+vvp build/sram-board-test.vvp
+```
+
+The simulation restarted during an active test, completed in 3,103 cycles,
+and detected both injected read corruption and a missing grant. Out-of-context
+UltraScale+ mapping passed `check -assert` and retained four `RAMB36E2` blocks.
+On the board,
+map `clk`, the synchronized `rst`, `done` and `pass` to the board's actual
+clock, reset and status pins or use an ILA. After routing with the board's
+constraints, load the design and record the first `done` and `pass` values
+after a cold start and a restart. Physical board results are pending.

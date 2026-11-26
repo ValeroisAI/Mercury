@@ -162,7 +162,7 @@ All charts below are generated directly from the Python simulators (`scripts/gen
 | [64-bank SRAM arbiter](./docs/verification/shared-sram-rtl.md) | 2,056 formal equivalence points against the serial implementation and a reduction from 1,561 to 26 generic synthesis logic levels |
 | [DMA tokens](./docs/verification/dma-token-rtl.md) | Bounded checks for generation-tagged completion and acquisition |
 | [Banked SRAM payload](./docs/verification/sram-payload-rtl.md) | Full-size simulation with eight saturated requesters and 512-bit lines, plus bounded checks for same-cycle turnover, byte masks, stalls, and reset |
-| [FPGA SRAM integration](./docs/verification/sram-bram-validation.md) | Four banks with 16 KiB total, read/write and reset simulation, and mapping to four UltraScale+ block RAM primitives |
+| [FPGA SRAM integration](./docs/verification/sram-bram-validation.md) | Four banks with 16 KiB total, mapping to four UltraScale+ block RAM primitives, and a simulated on-board self-test covering all 2,048 lines |
 
 With Yosys on PATH, run the [RTL regression](./scripts/check_rtl.py) from the repository root:
 
