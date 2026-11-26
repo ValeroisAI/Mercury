@@ -36,14 +36,18 @@ module mercury_sram_payload #(
     wire [BANKS*OWNER_BITS-1:0] bank_owner;
     reg [BANKS-1:0] bank_pending;
     reg [REQUESTERS-1:0] requester_pending;
+    wire [BANKS-1:0] bank_reply = bank_pending & bank_read_valid;
+    wire [REQUESTERS-1:0] response_consumed = resp_valid & resp_ready;
     wire [BANKS-1:0] replies [0:REQUESTERS-1];
     genvar b, r, node;
 
     mercury_sram_arbiter #(
         .REQUESTERS(REQUESTERS), .BANKS(BANKS), .LINE_ADDR_BITS(LINE_ADDR_BITS), .SWIZZLE(SWIZZLE)
     ) arbiter (
-        .clk(clk), .rst(rst), .req_valid(req_valid & ~requester_pending), .req_line(req_line),
-        .bank_ready(bank_ready & ~bank_pending), .req_grant(req_grant), .bank_issue(bank_issue),
+        .clk(clk), .rst(rst),
+        .req_valid(req_valid & (~requester_pending | response_consumed)), .req_line(req_line),
+        .bank_ready(bank_ready & (~bank_pending | bank_reply)),
+        .req_grant(req_grant), .bank_issue(bank_issue),
         .bank_owner(bank_owner), .bank_row(bank_row)
     );
 
@@ -51,7 +55,7 @@ module mercury_sram_payload #(
         wire [OWNER_BITS-1:0] owner = bank_owner[b*OWNER_BITS +: OWNER_BITS];
         reg [OWNER_BITS-1:0] read_owner;
         wire read_issued = bank_issue[b] && !bank_write[b];
-        wire capture_reply = bank_pending[b] && bank_read_valid[b];
+        wire capture_reply = bank_reply[b];
 
         assign bank_write[b] = bank_issue[b] && req_write[owner];
         assign bank_wdata[b*DATA_BITS +: DATA_BITS] =
@@ -78,6 +82,7 @@ module mercury_sram_payload #(
 
     for (r = 0; r < REQUESTERS; r = r + 1) begin: requester_port
         wire capture_reply = |replies[r];
+        wire read_issued = req_grant[r] && !req_write[r];
         wire [DATA_BITS-1:0] reply_tree [1:2*BANKS-1];
         reg held_valid;
         reg [DATA_BITS-1:0] held_data;
@@ -100,14 +105,16 @@ module mercury_sram_payload #(
                 requester_pending[r] <= 0;
                 held_valid <= 0;
                 held_data <= 0;
-            end else if (capture_reply) begin
-                held_valid <= 1;
-                held_data <= reply_tree[1];
-            end else if (resp_valid[r] && resp_ready[r]) begin
-                requester_pending[r] <= 0;
-                held_valid <= 0;
-            end else if (req_grant[r] && !req_write[r]) begin
-                requester_pending[r] <= 1;
+            end else begin
+                // A new read retains the slot when the old response retires.
+                if (read_issued || response_consumed[r])
+                    requester_pending[r] <= read_issued;
+                if (capture_reply) begin
+                    held_valid <= 1;
+                    held_data <= reply_tree[1];
+                end else if (response_consumed[r]) begin
+                    held_valid <= 0;
+                end
             end
         end
     end
